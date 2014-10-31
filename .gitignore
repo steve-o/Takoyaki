@@ -1,0 +1,7 @@
+*.jar
+*.swp
+target/
+logs/
+plano.sh
+wallachbeth-plano.sh
+ValueAdd_DomainRep.jar.reminder
