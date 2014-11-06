@@ -649,6 +649,10 @@ GenericOMMParser.parse (msg);
 				}
 				break;
 
+/* CLOSED is supposed to be a terminal status like something is not found or entitled.
+ * CLOSED_RECOVER is a transient problem that the consumer should attempt recovery such as 
+ * out of resources and thus unenable to store the request.
+ */
 			case OMMState.Stream.CLOSED:
 			case OMMState.Stream.CLOSED_RECOVER:
 				this.OnAppClosed (response);
@@ -669,6 +673,7 @@ GenericOMMParser.parse (msg);
 			this.resubmit();
 		}
 
+/* Transient problem, TREP will attempt to recover automatically */
 		private void OnAppSuspect (AppLoginResponse response) {
 			LOG.trace ("OnAppSuspect: {}", response);
 		}
@@ -984,6 +989,13 @@ GenericOMMParser.parse (msg);
 		this.cancelItemRequest (item_stream);
 		this.directory.remove (key);
 		LOG.trace ("Directory size: {}", this.directory.size());
+	}
+
+/* no native support by provider, so emulate functionality */
+	public void batchCreateAnalyticStream (Analytic[] analytics, AnalyticStream[] streams) {
+		for (int i = 0; i < analytics.length; ++i) {
+			this.createAnalyticStream (analytics[i], streams[i]);
+		}
 	}
 
 	public void createAnalyticStream (Analytic analytic, AnalyticStream stream) {

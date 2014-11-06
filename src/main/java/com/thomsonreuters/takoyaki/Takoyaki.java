@@ -441,10 +441,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 		@Override
 		public void notify (Dispatchable dispSource, java.lang.Object closure) {
-			LOG.trace ("on notify");
 			this.sock.sendMore ("");
-			this.sock.send ("dispatch");
-			LOG.trace ("sent.");
+			this.sock.send ("");
 		}
 	}
 
@@ -467,12 +465,6 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				String msg = this.dispatcher.recvStr();	// response
 				LOG.trace ("recv: {}", msg);
 				switch (msg) {
-				case "dispatch":
-					while (this.event_queue.isActive()) {
-						if (-1 == this.event_queue.dispatch (Dispatchable.NO_WAIT))
-							break;
-					}
-					break;
 				case "http":
 					this.dispatcher.sendMore (identity);
 					this.dispatcher.sendMore ("");
@@ -484,6 +476,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					}
 					break;
 				default:
+					if (this.event_queue.isActive())
+						this.event_queue.dispatch (Dispatchable.NO_WAIT);
 					break;
 				}
 			}
@@ -500,36 +494,53 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	final static Duration ONE_DAY = Duration.standardDays (1);
 	final DateTimeFormatter formatter = ISODateTimeFormat.dateTimeParser();
 
-	private class Singlepass implements AnalyticStreamDispatcher {
-		private final AnalyticStream request;
+	private class Multipass implements AnalyticStreamDispatcher {
+		private final ImmutableSet<AnalyticStream> requests;
 		private final ZMQ.Socket dispatcher;
+		private final Map<String, String> responses;
 
-		public Singlepass (AnalyticStream request, ZMQ.Socket dispatcher) {
-			this.request = request;
+		public Multipass (ImmutableSet<AnalyticStream> requests, ZMQ.Socket dispatcher) {
+			this.requests = requests;
 			this.dispatcher = dispatcher;
+			this.responses = Maps.newTreeMap();
 		}
 
 /* Format the final HTTP result, adjust per special snowflake requirements. */
 		@Override
 		public void dispatch (AnalyticStream stream, String stream_response) {
-/* complete result set by definition */
-			this.dispatcher.send (stream_response);
+			this.responses.put (stream.getItemName(), stream_response);
+			if (this.responses.size() != this.requests.size()) {
+/* pending complete result set */
+				return;
+			}
+			else if (1 == this.requests.size()) {
+				this.dispatcher.send (stream_response);
+			}
+			else {
+				final StringBuilder sb = new StringBuilder();
+				sb.append ("[");
+				final Joiner joiner = Joiner.on (",\n");
+				joiner.appendTo (sb, this.responses.values());
+				sb.append ("]");
+				this.dispatcher.send (sb.toString());
+			}
 		}
 	}
 
 	@Override
 	public void dispatch (AnalyticStream stream, String response) {
-		this.singlepass.dispatch (stream, response);
+		this.multipass.dispatch (stream, response);
 	}
 
-	public Singlepass singlepass;
+	public Multipass multipass;
 
-// http://ads/MSFT.O?signal=MMA(21,Close())
+// http://takoyaki/MSFT.O?signal=MMA(21,Close())
+// http://takoyaki/MSFT.O,GOOG.O?signal=MMA(21,Close())
 	private void handler (URI request) {
 		LOG.info ("GET: {}", request.toASCIIString());
 		final Map<String, List<String>> query = parseQueryParameters (request.getQuery(), Charset.forName ("UTF-8"));
 		Optional<String> signal = Optional.absent();
-		Optional<String> item = Optional.absent();
+		String[] items = {};
 /* Validate each parameter */
 		if (query.containsKey (SIGNAL_PARAM)) {
 			signal = Optional.of (getParameterValue (query, SIGNAL_PARAM));
@@ -537,24 +548,31 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		if (!Strings.isNullOrEmpty (request.getPath())
 			&& request.getPath().length() > 1)
 		{
-			item = Optional.of (new File (request.getPath()).getName());
+			items = Iterables.toArray (Splitter.on (',')
+					.trimResults()
+					.omitEmptyStrings()
+					.split (new File (request.getPath()).getName()), String.class);
 		}
 		if (!signal.isPresent()
-			|| !item.isPresent())
+			|| (0 == items.length))
 		{
 			this.dispatcher.send ("invalid request");
 			return;
 		}
+/* Build up batch request */
 		LOG.trace ("signal: {}", signal.get());
-		final Analytic analytic = new Analytic ("ECP_SAP",
+		final Analytic[] analytics = new Analytic[ items.length ];
+		final AnalyticStream[] streams = new AnalyticStream[ items.length ];
+		for (int i = 0; i < streams.length; ++i) {
+			LOG.trace ("item[{}]: {}", i, items[i]);
+			analytics[i] = new Analytic ("ECP_SAP",
 						"SignalApp",
 						signal.get(),
-						item.get());
-		LOG.trace ("analytic: {}", analytic);
-		final AnalyticStream stream = new AnalyticStream (this);
-		this.consumer.createAnalyticStream (analytic, stream);
-		LOG.trace ("stream: {}", stream);
-		this.singlepass = new Singlepass (stream, this.dispatcher);
+						items[i]);
+			streams[i] = new AnalyticStream (this);
+		}
+		this.consumer.batchCreateAnalyticStream (analytics, streams);
+		this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher);
 	}
 
 	private void clear() {
