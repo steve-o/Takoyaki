@@ -446,15 +446,26 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		}
 	}
 
+	private void drainqueue() {
+		LOG.trace ("Draining event queue.");
+		int count = 0;
+		try {
+			while (this.event_queue.dispatch (Dispatchable.NO_WAIT) > 0) { ++count; }
+			LOG.trace ("Queue contained {} events.", count);
+		} catch (DeactivatedException e) {
+/* ignore on empty queue */
+			if (count > 0) LOG.catching (e);
+		} catch (Exception e) {
+			LOG.catching (e);
+		}
+	}
+
 	private void mainloop() {
 		RfaDispatcher dispatcher = new RfaDispatcher (this.zmq_context);
 		this.event_queue.registerNotificationClient (dispatcher, null);
 		try {
 /* drain queue of pending events before client registration */
-			while (this.event_queue.isActive()) {
-				if (-1 == this.event_queue.dispatch (Dispatchable.NO_WAIT))
-					break;
-			}
+			this.drainqueue();
 			this.http_server.start();
 			LOG.info ("Listening on http://{}/", this.http_server.getAddress());
 /* on demand edge triggered dispatch */
@@ -481,9 +492,14 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					break;
 				}
 			}
-			this.http_server.stop (0 /* seconds */);
 		} catch (DispatchException e) {
 			LOG.error ("DispatchException: {}", Throwables.getStackTraceAsString (e));
+		} catch (Throwable t) {
+			LOG.catching (t);
+		} finally {
+			this.http_server.stop (0 /* seconds */);
+			if (!this.event_queue.isActive()) this.event_queue.deactivate();
+			this.drainqueue();
 		}
 		LOG.trace ("Mainloop deactivated.");
 		this.event_queue.unregisterNotificationClient (dispatcher);
@@ -595,6 +611,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 /* notify mainloop */
 			this.abort_sock.sendMore ("");
 			this.abort_sock.send ("abort");
+			this.drainqueue();
 		}
 
 		if (null != this.consumer) {
