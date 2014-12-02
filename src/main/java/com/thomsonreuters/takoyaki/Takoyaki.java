@@ -639,12 +639,13 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					  .append (lagtype.get());
 				}
 			}
-			LOG.trace ("techanalysis: {}", sb.toString());
+			final String analytic = sb.toString();
+			LOG.trace ("techanalysis: {}", analytic);
 			for (int i = 0; i < streams.length; ++i) {
 				LOG.trace ("item[{}]: {}", i, items[i]);
 				analytics[i] = new Analytic ("ECP_SAP",
 							"TechAnalysis",
-							sb.toString(),
+							analytic,
 							items[i]);
 				streams[i] = new AnalyticStream (this);
 			}

@@ -280,10 +280,13 @@ GenericOMMParser.parse (msg);
 // TBD: SignalsApp does not support snapshot requests.
 			if (stream.getAppName().equals ("SignalApp")) {
 				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
+				msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
 			} else {
 				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
+				sb.setLength (0);
+				sb.append ("/").append (stream.getItemName());
+				msg.setAttribInfo (null, sb.toString(), (short)0x1 /* RIC */);
 			}
-			msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
 
 /* OMMAttribInfo.Attrib as an OMMElementList */
 			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
@@ -518,16 +521,7 @@ GenericOMMParser.parse (msg);
  *   State: CLOSED, SUSPECT, ERROR,  " bidPrice: 97.42 bidSize: 400 bidtime: 2014-11-20T19:00:00.000Z  askPrice: 97.44 askSize: 100 asktime: 2014-11-20T19:00:00.000Z  tradePrice: 97.42 tradeSize: 52 tradetime: 2014-11-20T18:59:46.000Z "
  *   Payload: None
  */
-		private Map<String, String> parseTechAnalysis (String text) {
-			final Map<String, String> pairs = new LinkedHashMap<String, String>();
-			final Pattern pattern = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
-			final Matcher matcher = pattern.matcher (text);
-			while (matcher.find()) {
-				pairs.put (matcher.group (1), matcher.group (2));
-			}
-			return pairs;
-		}
-
+		private final Pattern TECHANALYSIS_PATTERN = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
 		private boolean OnTechAnalysisResponse (OMMMsg msg, AnalyticStream stream) {
 			LOG.trace ("OnTechAnalysisResponse: {}", msg);
 			if (!(msg.has (OMMMsg.HAS_STATE)
@@ -545,18 +539,26 @@ GenericOMMParser.parse (msg);
 			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
 			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
 			if (!text.isEmpty()) {
-				final Pattern pattern = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
-				final Matcher matcher = pattern.matcher (text);
+				final Matcher matcher = TECHANALYSIS_PATTERN.matcher (text);
+				int count = 0;
 				while (matcher.find()) {
+					final String name = matcher.group (1);
+/* invalid request -  failed to validate request, err: invalid datetime */
+					if (name.equals ("err")) {
+						return false;
+					}
 					sb.append (',')
-					  .append ('\"').append (matcher.group (1)).append ("\":");
+					  .append ('\"').append (name).append ("\":");
 					final String value = matcher.group (2);
 					if (null == Floats.tryParse (value)) {
 						sb.append ('\"').append (value).append ('\"');
 					} else {
 						sb.append (value);
 					}
+					++count;
 				}
+/* no publishers found for service */
+				if (0 == count) return false;
 			}
 			sb.append ("}");
 			stream.getDispatcher().dispatch (stream, sb.toString());
