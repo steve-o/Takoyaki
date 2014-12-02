@@ -19,7 +19,7 @@ DICTIONARY_OVERRIDE="RDMFieldDictionary"
 DICTIONARY_OVERRIDE=
 
 # Request timeout in seconds for absent NAK handling, default 60s.
-RETRY_TIMER="10"
+RETRY_TIMER="15"
 #RETRY_TIMER=
 RETRY_LIMIT="3"
 #RETRY_TIMER=

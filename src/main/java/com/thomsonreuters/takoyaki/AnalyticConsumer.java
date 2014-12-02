@@ -570,6 +570,10 @@ GenericOMMParser.parse (msg);
 			LOG.trace ("OnAnalyticsResponse: {}", msg);
 /* Closures do not work as expected, implement stream id map */
 			final AnalyticStream stream = this.stream_map.get (msg.getStreamId());
+			if (null == stream) {
+				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.getStreamId());
+				return;
+			}
 /* Clear request timeout */
 			if (stream.hasTimerHandle()) {
 				final Handle timer_handle = stream.getTimerHandle();
