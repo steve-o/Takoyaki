@@ -4,6 +4,8 @@
 package com.thomsonreuters.Takoyaki;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.net.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -11,12 +13,14 @@ import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.joda.time.DateTime;
 import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.common.primitives.Floats;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.reuters.rfa.common.Client;
@@ -273,7 +277,12 @@ GenericOMMParser.parse (msg);
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
 			msg.setAssociatedMetaInfo (this.private_stream);
-			msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
+// TBD: SignalsApp does not support snapshot requests.
+			if (stream.getAppName().equals ("SignalApp")) {
+				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
+			} else {
+				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
+			}
 			msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
 
 /* OMMAttribInfo.Attrib as an OMMElementList */
@@ -500,6 +509,61 @@ GenericOMMParser.parse (msg);
 			this.destroyItemStream (stream);
 		}
 
+/* example response:
+ * MESSAGE
+ *   Msg Type: MsgType.STATUS_RESP
+ *   Msg Model Type: Unknown Msg Model Type: 30
+ *   Indication Flags: PRIVATE_STREAM
+ *   Hint Flags: HAS_STATE
+ *   State: CLOSED, SUSPECT, ERROR,  " bidPrice: 97.42 bidSize: 400 bidtime: 2014-11-20T19:00:00.000Z  askPrice: 97.44 askSize: 100 asktime: 2014-11-20T19:00:00.000Z  tradePrice: 97.42 tradeSize: 52 tradetime: 2014-11-20T18:59:46.000Z "
+ *   Payload: None
+ */
+		private Map<String, String> parseTechAnalysis (String text) {
+			final Map<String, String> pairs = new LinkedHashMap<String, String>();
+			final Pattern pattern = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
+			final Matcher matcher = pattern.matcher (text);
+			while (matcher.find()) {
+				pairs.put (matcher.group (1), matcher.group (2));
+			}
+			return pairs;
+		}
+
+		private boolean OnTechAnalysisResponse (OMMMsg msg, AnalyticStream stream) {
+			LOG.trace ("OnTechAnalysisResponse: {}", msg);
+			if (!(msg.has (OMMMsg.HAS_STATE)
+				&& (OMMState.Stream.CLOSED == msg.getState().getStreamState())
+				&& (OMMState.Data.SUSPECT == msg.getState().getDataState())
+				&& (OMMState.Code.ERROR == msg.getState().getCode())))
+			{
+				return false;
+			}
+
+			final String text = msg.getState().getText();
+
+			sb.setLength (0);
+			sb.append ('{')
+			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
+			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
+			if (!text.isEmpty()) {
+				final Pattern pattern = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
+				final Matcher matcher = pattern.matcher (text);
+				while (matcher.find()) {
+					sb.append (',')
+					  .append ('\"').append (matcher.group (1)).append ("\":");
+					final String value = matcher.group (2);
+					if (null == Floats.tryParse (value)) {
+						sb.append ('\"').append (value).append ('\"');
+					} else {
+						sb.append (value);
+					}
+				}
+			}
+			sb.append ("}");
+			stream.getDispatcher().dispatch (stream, sb.toString());
+			this.destroyItemStream (stream);
+			return true;
+		}
+
 		private void OnAnalyticsResponse (OMMMsg msg, Handle handle, Object closure) {
 			LOG.trace ("OnAnalyticsResponse: {}", msg);
 /* Closures do not work as expected, implement stream id map */
@@ -534,6 +598,13 @@ GenericOMMParser.parse (msg);
 				if (msg.has (OMMMsg.HAS_STATE)
 					&& (OMMState.Stream.OPEN == msg.getState().getStreamState())
 					&& (OMMState.Data.OK == msg.getState().getDataState()))
+				{
+					return;
+				}
+
+/* Hook for TechAnalysis responses */
+				if (stream.getAppName().equals ("TechAnalysis")
+					&& this.OnTechAnalysisResponse (msg, stream))
 				{
 					return;
 				}

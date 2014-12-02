@@ -86,8 +86,12 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String UUID_PARAM			= "uuid";
 
 	private static final String SIGNAL_PARAM		= "signal";
+	private static final String TECHANALYSIS_PARAM		= "analytic";
+	private static final String DATETIME_PARAM		= "datetime";
 	private static final String TIME_INTERVAL_PARAM		= "interval";
-	private static final String PERIOD_PARAM		= "period";
+	private static final String SNAPBY_PARAM		= "snapby";
+	private static final String LAGTYPE_PARAM		= "lagtype";
+	private static final String LAG_PARAM			= "lag";
 
 	private static final String SESSION_OPTION		= "session";
 	private static final String HELP_OPTION			= "help";
@@ -552,14 +556,38 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 // http://takoyaki/MSFT.O?signal=MMA(21,Close())
 // http://takoyaki/MSFT.O,GOOG.O?signal=MMA(21,Close())
+// http://takoyaki/SBUX.O?techanalysis=taqfromdatetime&datetime=2014-11-20T19:00:00.000Z
+// --> #type=taqfromdatetime datetime=2014-11-20T19:00:00.000Z
+
+// supported parameters:
+//   snapby  - [ time | trade | quote ]
+//   lagtype - [ trade | quote | second | minute | hour | volume ]
+//   lag     - <integer>
+
 	private void handler (URI request) {
 		LOG.info ("GET: {}", request.toASCIIString());
 		final Map<String, List<String>> query = parseQueryParameters (request.getQuery(), Charset.forName ("UTF-8"));
 		Optional<String> signal = Optional.absent();
+		Optional<String> techanalysis = Optional.absent(), datetime = Optional.absent(), snapby = Optional.absent(), lagtype = Optional.absent(), lag = Optional.absent();
 		String[] items = {};
 /* Validate each parameter */
 		if (query.containsKey (SIGNAL_PARAM)) {
 			signal = Optional.of (getParameterValue (query, SIGNAL_PARAM));
+		}
+		if (query.containsKey (TECHANALYSIS_PARAM)) {
+			techanalysis = Optional.of (getParameterValue (query, TECHANALYSIS_PARAM));
+			if (query.containsKey (DATETIME_PARAM)) {
+				datetime = Optional.of (getParameterValue (query, DATETIME_PARAM));
+			}
+			if (query.containsKey (SNAPBY_PARAM)) {
+				snapby = Optional.of (getParameterValue (query, SNAPBY_PARAM));
+			}
+			if (query.containsKey (LAG_PARAM)) {
+				lag = Optional.of (getParameterValue (query, LAG_PARAM));
+				if (query.containsKey (LAGTYPE_PARAM)) {
+					lagtype = Optional.of (getParameterValue (query, LAGTYPE_PARAM));
+				}
+			}
 		}
 		if (!Strings.isNullOrEmpty (request.getPath())
 			&& request.getPath().length() > 1)
@@ -569,23 +597,57 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					.omitEmptyStrings()
 					.split (new File (request.getPath()).getName()), String.class);
 		}
-		if (!signal.isPresent()
+		if ((!signal.isPresent() && !techanalysis.isPresent())
 			|| (0 == items.length))
 		{
 			this.dispatcher.send ("invalid request");
 			return;
 		}
 /* Build up batch request */
-		LOG.trace ("signal: {}", signal.get());
 		final Analytic[] analytics = new Analytic[ items.length ];
 		final AnalyticStream[] streams = new AnalyticStream[ items.length ];
-		for (int i = 0; i < streams.length; ++i) {
-			LOG.trace ("item[{}]: {}", i, items[i]);
-			analytics[i] = new Analytic ("ECP_SAP",
-						"SignalApp",
-						signal.get(),
-						items[i]);
-			streams[i] = new AnalyticStream (this);
+		if (signal.isPresent())
+		{
+			LOG.trace ("signal: {}", signal.get());
+			for (int i = 0; i < streams.length; ++i) {
+				LOG.trace ("item[{}]: {}", i, items[i]);
+				analytics[i] = new Analytic ("ECP_SAP",
+							"SignalApp",
+							signal.get(),
+							items[i]);
+				streams[i] = new AnalyticStream (this);
+			}
+		}
+		else
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.append ("#type=")
+			  .append (techanalysis.get());
+			if (datetime.isPresent()) {
+				sb.append (" datetime=")
+				  .append (datetime.get());
+			}
+			if (snapby.isPresent()) {
+				sb.append (" snapby=")
+				  .append (snapby.get());
+			}
+			if (lag.isPresent()) {
+				sb.append (" lag=")
+				  .append (lag.get());
+				if (lagtype.isPresent()) {
+					sb.append (" lagtype=")
+					  .append (lagtype.get());
+				}
+			}
+			LOG.trace ("techanalysis: {}", sb.toString());
+			for (int i = 0; i < streams.length; ++i) {
+				LOG.trace ("item[{}]: {}", i, items[i]);
+				analytics[i] = new Analytic ("ECP_SAP",
+							"TechAnalysis",
+							sb.toString(),
+							items[i]);
+				streams[i] = new AnalyticStream (this);
+			}
 		}
 		this.consumer.batchCreateAnalyticStream (analytics, streams);
 		this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher);
