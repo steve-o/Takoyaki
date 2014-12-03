@@ -12,11 +12,13 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.joda.time.DateTime;
+import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -533,20 +535,42 @@ GenericOMMParser.parse (msg);
 			}
 
 			final String text = msg.getState().getText();
+			if (text.isEmpty()
+				|| !(text.startsWith (" bidPrice: ")			/* taqfromdatetime */
+				     || text.startsWith (" tradePrice: ")
+				     || text.startsWith ("201")))			/* tradespreadperformance */
+			{
+				return false;
+			}
 
 			sb.setLength (0);
 			sb.append ('{')
 			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
 			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
-			if (!text.isEmpty()) {
+			if (text.startsWith ("201"))
+			{
+				sb.append (',')
+				  .append ("\"timeseries\": [[");
+				List<String> times = Lists.newLinkedList(), values = Lists.newLinkedList();
+				final Splitter newline = Splitter.on ('\n').omitEmptyStrings(), comma = Splitter.on (',');
+				for (String entry : newline.split (text)) {
+					Iterator<String> it = comma.split (entry).iterator();
+					times.add (it.next());
+					values.add (it.next());
+				}
+				Joiner.on (",").appendTo (sb, Iterables.transform (times, new Function<String, String>() {
+					public String apply (String arg0) {
+						return "\"" + arg0 + "\"";
+					}}));
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, values.iterator());
+				sb.append ("]]");
+			}
+			else
+			{
 				final Matcher matcher = TECHANALYSIS_PATTERN.matcher (text);
-				int count = 0;
 				while (matcher.find()) {
 					final String name = matcher.group (1);
-/* invalid request -  failed to validate request, err: invalid datetime */
-					if (name.equals ("err")) {
-						return false;
-					}
 					sb.append (',')
 					  .append ('\"').append (name).append ("\":");
 					final String value = matcher.group (2);
@@ -555,10 +579,7 @@ GenericOMMParser.parse (msg);
 					} else {
 						sb.append (value);
 					}
-					++count;
 				}
-/* no publishers found for service */
-				if (0 == count) return false;
 			}
 			sb.append ("}");
 			stream.getDispatcher().dispatch (stream, sb.toString());

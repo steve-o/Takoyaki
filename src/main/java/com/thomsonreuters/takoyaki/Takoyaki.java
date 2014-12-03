@@ -88,10 +88,11 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String SIGNAL_PARAM		= "signal";
 	private static final String TECHANALYSIS_PARAM		= "analytic";
 	private static final String DATETIME_PARAM		= "datetime";
-	private static final String TIME_INTERVAL_PARAM		= "interval";
+	private static final String TIMEINTERVAL_PARAM		= "interval";
 	private static final String SNAPBY_PARAM		= "snapby";
 	private static final String LAGTYPE_PARAM		= "lagtype";
 	private static final String LAG_PARAM			= "lag";
+	private static final String RETURNFORMAT_PARAM		= "returnformat";
 
 	private static final String SESSION_OPTION		= "session";
 	private static final String HELP_OPTION			= "help";
@@ -562,9 +563,10 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 // --> #type=tradeperformancespread startdatetime=2014-11-24T17:05:15.444Z enddatetime=2014-11-24T17:07:15.444Z returnmode=historical returnformat=perunit
 
 // supported parameters:
-//   snapby  - [ time | trade | quote ]
-//   lagtype - [ trade | quote | second | minute | hour | volume ]
-//   lag     - <integer>
+//   snapby       - [ time | trade | quote ]
+//   lagtype      - [ trade | quote | second | minute | hour | volume | duration ]
+//   lag          - [ signed integer | iso 8601 duration ]
+//   interval     - < iso 8601 interval >
 //   returnformat - [ perunit | decimal | percent | basispoints ]
 
 	private void handler (URI request) {
@@ -572,6 +574,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		final Map<String, List<String>> query = parseQueryParameters (request.getQuery(), Charset.forName ("UTF-8"));
 		Optional<String> signal = Optional.absent();
 		Optional<String> techanalysis = Optional.absent(), datetime = Optional.absent(), snapby = Optional.absent(), lagtype = Optional.absent(), lag = Optional.absent();
+		Optional<String> timeinterval = Optional.absent(), returnformat = Optional.absent();
 		String[] items = {};
 /* Validate each parameter */
 		if (query.containsKey (SIGNAL_PARAM)) {
@@ -590,6 +593,12 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				if (query.containsKey (LAGTYPE_PARAM)) {
 					lagtype = Optional.of (getParameterValue (query, LAGTYPE_PARAM));
 				}
+			}
+			if (query.containsKey (TIMEINTERVAL_PARAM)) {
+				timeinterval = Optional.of (getParameterValue (query, TIMEINTERVAL_PARAM));
+			}
+			if (query.containsKey (RETURNFORMAT_PARAM)) {
+				returnformat = Optional.of (getParameterValue (query, RETURNFORMAT_PARAM));
 			}
 		}
 		if (!Strings.isNullOrEmpty (request.getPath())
@@ -647,6 +656,18 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				}
 				sb.append (" lag=")
 				  .append (lag.get());
+			}
+			if (timeinterval.isPresent()) {
+				final Interval interval = Interval.parse (timeinterval.get());
+				sb.append (" startdatetime=")
+				  .append (interval.getStart().toDateTime (DateTimeZone.UTC).toString())
+				  .append (" enddatetime=")
+				  .append (interval.getEnd().toDateTime (DateTimeZone.UTC).toString())
+				  .append (" returnmode=historical");
+			}
+			if (returnformat.isPresent()) {
+				sb.append (" returnformat=")
+				  .append (returnformat.get());
 			}
 			final String analytic = sb.toString();
 			LOG.trace ("techanalysis: {}", analytic);
