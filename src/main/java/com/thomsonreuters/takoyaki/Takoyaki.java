@@ -556,13 +556,16 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 // http://takoyaki/MSFT.O?signal=MMA(21,Close())
 // http://takoyaki/MSFT.O,GOOG.O?signal=MMA(21,Close())
-// http://takoyaki/SBUX.O?techanalysis=taqfromdatetime&datetime=2014-11-20T19:00:00.000Z
+// http://takoyaki/SBUX.O?analytic=taqfromdatetime&datetime=2014-11-20T19:00:00.000Z
 // --> #type=taqfromdatetime datetime=2014-11-20T19:00:00.000Z
+// http://takoyaki/SBUX.O?analytic=tradeperformancespread&interval=2014-11-24T17:05:15.444Z/PT2M&returnformat=perunit
+// --> #type=tradeperformancespread startdatetime=2014-11-24T17:05:15.444Z enddatetime=2014-11-24T17:07:15.444Z returnmode=historical returnformat=perunit
 
 // supported parameters:
 //   snapby  - [ time | trade | quote ]
 //   lagtype - [ trade | quote | second | minute | hour | volume ]
 //   lag     - <integer>
+//   returnformat - [ perunit | decimal | percent | basispoints ]
 
 	private void handler (URI request) {
 		LOG.info ("GET: {}", request.toASCIIString());
@@ -632,12 +635,18 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				  .append (snapby.get());
 			}
 			if (lag.isPresent()) {
-				sb.append (" lag=")
-				  .append (lag.get());
 				if (lagtype.isPresent()) {
+// override content
+					if (lagtype.get().equals ("duration")) {
+						final Duration duration = Period.parse (lag.get()).toStandardDuration();
+						lagtype = Optional.of ("second");
+						lag = Optional.of (Long.toString (duration.getStandardSeconds()));
+					}
 					sb.append (" lagtype=")
 					  .append (lagtype.get());
 				}
+				sb.append (" lag=")
+				  .append (lag.get());
 			}
 			final String analytic = sb.toString();
 			LOG.trace ("techanalysis: {}", analytic);

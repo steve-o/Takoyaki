@@ -16,12 +16,12 @@ UUID=PAXTRA77968
 # Read from local files, leave empty to download from ADS.
 # format: <field dictionary>,<enum dictionary>
 DICTIONARY_OVERRIDE="RDMFieldDictionary"
-DICTIONARY_OVERRIDE=
+#DICTIONARY_OVERRIDE=
 
 # Request timeout in seconds for absent NAK handling, default 60s.
 RETRY_TIMER="15"
 #RETRY_TIMER=
-RETRY_LIMIT="3"
+RETRY_LIMIT="0"
 #RETRY_TIMER=
 
 ## -- end config --
