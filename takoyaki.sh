@@ -8,7 +8,7 @@ ENABLEASSERTIONS=-enableassertions
 #ENABLEASSERTIONS=
 
 TAKOYAKI=target/classes
-TAKOYAKI=target/Takoyaki-2.2-SNAPSHOT.jar
+TAKOYAKI=target/Takoyaki-2.3-SNAPSHOT.jar
 
 # Apache Commons command-line-processor
 COMMONSCLI=commons-cli-1.2.jar

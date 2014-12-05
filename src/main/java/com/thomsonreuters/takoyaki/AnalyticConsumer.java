@@ -169,6 +169,7 @@ public class AnalyticConsumer implements Client {
 		private LinkedHashMap<Integer, AnalyticStream> stream_map;
 		private int stream_id;
 		private boolean pending_connection;	/* to app */
+		private ResponseStatus closed_response_status;
 		private Handle private_stream;
 
 		public App (EventQueue event_queue, OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, Handle login_handle, String service_name, String app_name, String uuid) {
@@ -185,6 +186,8 @@ public class AnalyticConsumer implements Client {
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
 			this.setPendingConnection();
+// Appears until infrastructure returns new close status to present.
+			this.closed_response_status = new ResponseStatus (OMMState.Stream.CLOSED, OMMState.Data.SUSPECT, OMMState.Code.NO_RESOURCES, "No service private stream available to process the request.");
 		}
 
 		private void createPrivateStream() {
@@ -241,23 +244,22 @@ GenericOMMParser.parse (msg);
 		public void destroyItemStream (AnalyticStream stream) {
 			if (stream.isClosed()) {
 				LOG.trace ("Stream already closed, do not submit close request.");
-				return;
+			} else {
+// WARNING: no close confirmation from app.
+				this.cancelItemRequest (stream);
+				stream.close();
 			}
-
-// no close confirmation from app.
-			this.cancelItemRequest (stream);
 			this.removeItemStream (stream);
-			if (stream.hasTimerHandle()) {
-				this.omm_consumer.unregisterClient (stream.getTimerHandle());
-				stream.clearTimerHandle();
-				stream.clearRetryCount();
-			}
-			stream.close();
 		}
 
 		public void removeItemStream (AnalyticStream stream) {
 			this.streams.remove (stream);
 			this.stream_map.remove (stream.getStreamId());
+			if (stream.hasTimerHandle()) {
+				this.omm_consumer.unregisterClient (stream.getTimerHandle());
+				stream.clearTimerHandle();
+				stream.clearRetryCount();
+			}
 		}
 
 		public void resubmit() {
@@ -400,7 +402,11 @@ GenericOMMParser.parse (cmd.getMsg());
 			} else if (null != stream.getTimerHandle()) {
 				this.omm_consumer.unregisterClient (stream.getTimerHandle());
 			}
-			if (stream.getRetryCount() >= retry_limit) {
+/* no retry if private stream is not available */
+			if (this.pending_connection) {
+				this.OnAnalyticsStatus (this.closed_response_status, stream);
+				stream.clearTimerHandle();
+			} else if (stream.getRetryCount() >= retry_limit) {
 				this.OnAnalyticsStatus (new ResponseStatus (OMMState.Stream.OPEN, OMMState.Data.SUSPECT, OMMState.Code.NONE, "Source did not respond."),
 							stream);
 /* prevent repeated invocation */
@@ -789,7 +795,8 @@ GenericOMMParser.parse (msg);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}
-/* Await timer to re-open private stream ... */
+/* Await timer to re-open private stream, cache close message until connected. */
+			this.closed_response_status = response.getRespStatus();
 			this.private_stream = null;
 		}
 
