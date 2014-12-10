@@ -641,8 +641,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			sb.append ("#type=")
 			  .append (techanalysis.get());
 			if (datetime.isPresent()) {
+				final DateTime parsed_datetime = DateTime.parse (datetime.get());
 				sb.append (" datetime=")
-				  .append (datetime.get());
+				  .append (parsed_datetime.withZone (DateTimeZone.UTC).toString());
 			}
 			if (snapby.isPresent()) {
 				sb.append (" snapby=")
