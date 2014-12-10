@@ -4,7 +4,7 @@
 package com.thomsonreuters.Takoyaki;
 
 public interface AnalyticStreamDispatcher {
-	public void dispatch (AnalyticStream stream, String response);
+	public void dispatch (AnalyticStream stream, int response_code, String response);
 }
 
 /* eof */

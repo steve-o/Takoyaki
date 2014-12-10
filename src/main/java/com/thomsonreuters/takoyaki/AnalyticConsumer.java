@@ -404,16 +404,18 @@ GenericOMMParser.parse (cmd.getMsg());
 			}
 /* no retry if private stream is not available */
 			if (this.pending_connection) {
-				this.OnAnalyticsStatus (this.closed_response_status, stream);
+				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
 				stream.clearTimerHandle();
 			} else if (stream.getRetryCount() >= retry_limit) {
 				this.OnAnalyticsStatus (new ResponseStatus (OMMState.Stream.OPEN, OMMState.Data.SUSPECT, OMMState.Code.NONE, "Source did not respond."),
-							stream);
+							stream,
+							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 /* prevent repeated invocation */
 				stream.clearTimerHandle();
 			} else {
 				this.OnAnalyticsStatus (new ResponseStatus (OMMState.Stream.OPEN, OMMState.Data.SUSPECT, OMMState.Code.NONE, "Source did not respond.  Retrying."),
-							stream);
+							stream,
+							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 				stream.incrementRetryCount();
 				this.sendItemRequest (stream);
 				this.registerRetryTimer (stream, retry_timer_ms);
@@ -504,7 +506,7 @@ GenericOMMParser.parse (msg);
 			}
 		}
 
-		private void OnAnalyticsStatus (ResponseStatus response_status, AnalyticStream stream) {
+		private void OnAnalyticsStatus (ResponseStatus response_status, AnalyticStream stream, int response_code) {
 /* Defer to GSON to escape status text. */
 			LogMessage log_msg = new LogMessage (
 				"STATUS",
@@ -516,7 +518,13 @@ GenericOMMParser.parse (msg);
 				OMMState.Data.toString (response_status.getDataState()),
 				OMMState.Code.toString (response_status.getCode()),
 				response_status.getText());
-			stream.getDispatcher().dispatch (stream, gson.toJson (log_msg));
+			if (HttpURLConnection.HTTP_UNAVAILABLE == response_code) {
+/* for SBUX.N response.GetInstrumentDataAsXmlResult->error:  description: Host: NYCSCR03, error: UnknownInstrument errorCode: TAS__ErrorCode__TSIError errorCode: 1 */
+				if (log_msg.text.contains ("error: UnknownInstrument")) {
+					response_code = HttpURLConnection.HTTP_NOT_FOUND;
+				}
+			}
+			stream.getDispatcher().dispatch (stream, response_code, gson.toJson (log_msg));
 			this.destroyItemStream (stream);
 		}
 
@@ -588,7 +596,7 @@ GenericOMMParser.parse (msg);
 				}
 			}
 			sb.append ("}");
-			stream.getDispatcher().dispatch (stream, sb.toString());
+			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 			this.destroyItemStream (stream);
 			return true;
 		}
@@ -619,7 +627,7 @@ GenericOMMParser.parse (msg);
 			else if (OMMMsg.MsgType.UPDATE_RESP == msg.getMsgType()) {
 				LOG.trace ("Ignoring update.");
 				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, "internal error");
+					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected final update response.");
 					this.destroyItemStream (stream);
 				}
 				return;
@@ -643,13 +651,14 @@ GenericOMMParser.parse (msg);
 				}
 
 				this.OnAnalyticsStatus (new ResponseStatus (msg.getState()),
-							stream);
+							stream,
+							HttpURLConnection.HTTP_UNAVAILABLE);
 				return;
 			}
 			else {
 				LOG.trace ("Unhandled OMM message type ({}).", msg.getMsgType());
 				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, "internal error");
+					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected final response.");
 					this.destroyItemStream (stream);
 				}
 				return;
@@ -658,7 +667,7 @@ GenericOMMParser.parse (msg);
 			if (OMMTypes.FIELD_LIST != msg.getDataType()) {
 				LOG.trace ("Unsupported data type ({}) in OMM event.", msg.getDataType());
 				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, "internal error");
+					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
 					this.destroyItemStream (stream);
 				}
 				return;
@@ -726,7 +735,7 @@ GenericOMMParser.parse (msg);
 				}
 			}
 			sb.append ("}");
-			stream.getDispatcher().dispatch (stream, sb.toString());
+			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 			this.destroyItemStream (stream);
 		}
 
@@ -791,7 +800,8 @@ GenericOMMParser.parse (msg);
 				stream.close();
 /* Destroy for snapshots */
 				this.OnAnalyticsStatus (response.getRespStatus(),
-							stream);
+							stream,
+							HttpURLConnection.HTTP_UNAVAILABLE);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}

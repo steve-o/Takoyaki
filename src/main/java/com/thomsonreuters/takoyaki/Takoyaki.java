@@ -530,14 +530,14 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 /* Format the final HTTP result, adjust per special snowflake requirements. */
 		@Override
-		public void dispatch (AnalyticStream stream, String stream_response) {
+		public void dispatch (AnalyticStream stream, int response_code, String stream_response) {
 			this.responses.put (stream.getItemName(), stream_response);
 			if (this.responses.size() != this.requests.size()) {
 /* pending complete result set */
 				return;
 			}
 			else if (1 == this.requests.size()) {
-				this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_OK));
+				this.dispatcher.sendMore (Integer.toString (response_code));
 				this.dispatcher.send (stream_response);
 			}
 			else {
@@ -546,15 +546,15 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				final Joiner joiner = Joiner.on (",\n");
 				joiner.appendTo (sb, this.responses.values());
 				sb.append ("]");
-				this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_OK));
+				this.dispatcher.sendMore (Integer.toString (response_code));
 				this.dispatcher.send (sb.toString());
 			}
 		}
 	}
 
 	@Override
-	public void dispatch (AnalyticStream stream, String response) {
-		this.multipass.dispatch (stream, response);
+	public void dispatch (AnalyticStream stream, int response_code, String response) {
+		this.multipass.dispatch (stream, response_code, response);
 	}
 
 	public Multipass multipass;
@@ -617,7 +617,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			|| (0 == items.length))
 		{
 			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
-			this.dispatcher.send ("invalid request");
+			this.dispatcher.send ("Invalid request.");
 			return;
 		}
 /* Build up batch request */
@@ -641,9 +641,15 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			sb.append ("#type=")
 			  .append (techanalysis.get());
 			if (datetime.isPresent()) {
-				final DateTime parsed_datetime = DateTime.parse (datetime.get());
-				sb.append (" datetime=")
-				  .append (parsed_datetime.withZone (DateTimeZone.UTC).toString());
+				try {
+					final DateTime parsed_datetime = DateTime.parse (datetime.get());
+					sb.append (" datetime=")
+					  .append (parsed_datetime.withZone (DateTimeZone.UTC).toString());
+				} catch (IllegalArgumentException e) {
+					this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
+					this.dispatcher.send ("datetime: " + e.getMessage());
+					return;
+				}
 			}
 			if (snapby.isPresent()) {
 				sb.append (" snapby=")
@@ -653,9 +659,15 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				if (lagtype.isPresent()) {
 // override content
 					if (lagtype.get().equals ("duration")) {
-						final Duration duration = Period.parse (lag.get()).toStandardDuration();
-						lagtype = Optional.of ("second");
-						lag = Optional.of (Long.toString (duration.getStandardSeconds()));
+						try {
+							final Duration duration = Period.parse (lag.get()).toStandardDuration();
+							lagtype = Optional.of ("second");
+							lag = Optional.of (Long.toString (duration.getStandardSeconds()));
+						} catch (IllegalArgumentException e) {
+							this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
+							this.dispatcher.send ("lag: " + e.getMessage());
+							return;
+						}
 					}
 					sb.append (" lagtype=")
 					  .append (lagtype.get());
@@ -664,12 +676,18 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				  .append (lag.get());
 			}
 			if (timeinterval.isPresent()) {
-				final Interval interval = Interval.parse (timeinterval.get());
-				sb.append (" startdatetime=")
-				  .append (interval.getStart().toDateTime (DateTimeZone.UTC).toString())
-				  .append (" enddatetime=")
-				  .append (interval.getEnd().toDateTime (DateTimeZone.UTC).toString())
-				  .append (" returnmode=historical");
+				try {
+					final Interval parsed_interval = Interval.parse (timeinterval.get());
+					sb.append (" startdatetime=")
+					  .append (parsed_interval.getStart().toDateTime (DateTimeZone.UTC).toString())
+					  .append (" enddatetime=")
+					  .append (parsed_interval.getEnd().toDateTime (DateTimeZone.UTC).toString())
+					  .append (" returnmode=historical");
+				} catch (IllegalArgumentException e) {
+					this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
+					this.dispatcher.send ("interval: " + e.getMessage());
+					return;
+				}
 			}
 			if (returnformat.isPresent()) {
 				sb.append (" returnformat=")
