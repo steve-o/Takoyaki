@@ -354,10 +354,11 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					this.sock.sendMore ("http");
 					this.sock.send (request.toASCIIString());
 					this.sock.recvStr();	//  Envelope delimiter
+					final int response_code = Integer.parseInt (this.sock.recvStr());
 					final String response = this.sock.recvStr();
 					enableCompressionIfSupported (exchange);
 					exchange.getResponseHeaders().set ("Content-Type", "application/json");
-					exchange.sendResponseHeaders (HttpURLConnection.HTTP_OK, 0);
+					exchange.sendResponseHeaders (response_code, 0);
 					final OutputStream os = exchange.getResponseBody();
 					os.write (response.getBytes());
 					os.flush();
@@ -488,6 +489,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 						final URI request = new URI (this.dispatcher.recvStr());
 						this.handler (request);
 					} catch (Exception e) {
+						this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_INTERNAL_ERROR));
 						this.dispatcher.send (Throwables.getStackTraceAsString (e));
 					}
 					break;
@@ -535,6 +537,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				return;
 			}
 			else if (1 == this.requests.size()) {
+				this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_OK));
 				this.dispatcher.send (stream_response);
 			}
 			else {
@@ -543,6 +546,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				final Joiner joiner = Joiner.on (",\n");
 				joiner.appendTo (sb, this.responses.values());
 				sb.append ("]");
+				this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_OK));
 				this.dispatcher.send (sb.toString());
 			}
 		}
@@ -612,6 +616,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		if ((!signal.isPresent() && !techanalysis.isPresent())
 			|| (0 == items.length))
 		{
+			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
 			this.dispatcher.send ("invalid request");
 			return;
 		}
