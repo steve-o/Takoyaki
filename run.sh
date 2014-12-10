@@ -10,6 +10,9 @@ PRIMARY_ADS=nylabads2
 ADS_LIST=
 ADS_LIST=$PRIMARY_ADS,nylabads1
 
+# TBD: hEDD, similar.
+SERVICE=
+
 # Signals App login UUID, concurrent logins typically kick oldest session.
 UUID=PAXTRA77968
 
@@ -29,7 +32,7 @@ RETRY_LIMIT="0"
 # RSSL-only
 SESSION="rssl://"
 test -n "$DACS" && SESSION="$SESSION$DACS@"
-SESSION="${SESSION}${PRIMARY_ADS}/?uuid=$UUID"
+SESSION="${SESSION}${PRIMARY_ADS}/$SERVICE?uuid=$UUID"
 test -n "$ADS_LIST" && SESSION="$SESSION&server-list=$ADS_LIST"
 test -n "$DICTIONARY_OVERRIDE" && SESSION="$SESSION&dictionary=$DICTIONARY_OVERRIDE"
 test -n "$RETRY_TIMER" && SESSION="$SESSION&retry-timer=$RETRY_TIMER"

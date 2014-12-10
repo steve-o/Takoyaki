@@ -58,7 +58,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private EventQueue event_queue;
 
 /* RFA consumer */
-	private AnalyticConsumer consumer;
+	private AnalyticConsumer analytic_consumer;
 
 /* ZeroMQ context */
 	private ZMQ.Context zmq_context;
@@ -311,10 +311,10 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.event_queue = EventQueue.create (this.config.getEventQueueName());
 
 /* RFA consumer */
-		this.consumer = new AnalyticConsumer (this.config.getSession(),
+		this.analytic_consumer = new AnalyticConsumer (this.config.getSession(),
 					this.rfa,
 					this.event_queue);
-		this.consumer.init();
+		this.analytic_consumer.init();
 
 /* HTTP server */
 		this.http_server = HttpServer.create (new InetSocketAddress (8000), 0);
@@ -559,6 +559,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 	public Multipass multipass;
 
+// http://takoyaki/SBUX.O
 // http://takoyaki/MSFT.O?signal=MMA(21,Close())
 // http://takoyaki/MSFT.O,GOOG.O?signal=MMA(21,Close())
 // http://takoyaki/SBUX.O?analytic=taqfromdatetime&datetime=2014-11-20T19:00:00.000Z
@@ -613,11 +614,20 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					.omitEmptyStrings()
 					.split (new File (request.getPath()).getName()), String.class);
 		}
-		if ((!signal.isPresent() && !techanalysis.isPresent())
-			|| (0 == items.length))
-		{
+		if (0 == items.length) {
 			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
 			this.dispatcher.send ("Invalid request.");
+			return;
+		} else if (!signal.isPresent() && !techanalysis.isPresent()) {
+// TBD: insert vanilla multi-pass here.
+/*			final ItemStream[] streams = new ItemStream[ items.length ];
+			for (int i = 0; i < streams.length; ++i) {
+				streams[i] = new ItemStream (this);
+			}
+			this.consumer.batchCreateItemStream ("ELEKTRON_EDGE", items, DEFAULT_FIELDS, streams);
+			this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher); */
+			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_NOT_IMPLEMENTED));
+			this.dispatcher.send ("Non-analytic data not implemented.");
 			return;
 		}
 /* Build up batch request */
@@ -704,7 +714,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				streams[i] = new AnalyticStream (this);
 			}
 		}
-		this.consumer.batchCreateAnalyticStream (analytics, streams);
+		this.analytic_consumer.batchCreateAnalyticStream (analytics, streams);
 		this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher);
 	}
 
@@ -731,10 +741,10 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			this.drainqueue();
 		}
 
-		if (null != this.consumer) {
+		if (null != this.analytic_consumer) {
 			LOG.trace ("Closing Consumer.");
-			this.consumer.clear();
-			this.consumer = null;
+			this.analytic_consumer.clear();
+			this.analytic_consumer = null;
 		}
 
 		if (null != this.event_queue) {
