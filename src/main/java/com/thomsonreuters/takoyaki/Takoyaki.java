@@ -320,25 +320,27 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.http_server = HttpServer.create (new InetSocketAddress (8000), 0);
 		this.http_handler = new MyHandler (this.zmq_context);
 		this.http_context = this.http_server.createContext ("/", this.http_handler);
-		this.http_server.setExecutor (java.util.concurrent.Executors.newSingleThreadExecutor());
+
+		this.multipass = Maps.newHashMap();
+
+/* Single thread useful for debugging */
+//		this.http_server.setExecutor (java.util.concurrent.Executors.newSingleThreadExecutor());
+/* Default sensible multi-threaded option */
+		this.http_server.setExecutor (java.util.concurrent.Executors.newCachedThreadPool());
 	}
 
 	private class MyHandler implements HttpHandler {
-		private ZMQ.Socket sock;
+		private ZMQ.Context context;
+		private Random rand;
 
 		public MyHandler (ZMQ.Context zmq_context) {
-			this.sock = zmq_context.socket (ZMQ.DEALER);
-			Random rand = new Random (System.currentTimeMillis());
-			String identity = String.format ("%04X-%04X", rand.nextInt(), rand.nextInt());
-			this.sock.setIdentity (identity.getBytes());
-			this.sock.connect ("inproc://rfa");
+			LOG.trace ("New HttpHandler context.");
+			this.context = zmq_context;
+			this.rand = new Random (System.currentTimeMillis());
 		}
 
 		public void reset() {
-			if (null != this.sock) {
-				this.sock.close();
-				this.sock = null;
-			}
+			this.context = null;
 		}
 
 		@Override
@@ -347,24 +349,37 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				final URI request = exchange.getRequestURI();
 				final String path = request.getPath();
 				if (path.equalsIgnoreCase ("/favicon.ico")) {
+					LOG.trace ("404 Not Found.");
 					exchange.getResponseHeaders().set ("Cache-Control", "public, max-age=691200");
 					exchange.sendResponseHeaders (HttpURLConnection.HTTP_NOT_FOUND, 0);
 				} else {
-					this.sock.sendMore ("");
-					this.sock.sendMore ("http");
-					this.sock.send (request.toASCIIString());
-					this.sock.recvStr();	//  Envelope delimiter
-					final int response_code = Integer.parseInt (this.sock.recvStr());
-					final String response = this.sock.recvStr();
-					enableCompressionIfSupported (exchange);
-					exchange.getResponseHeaders().set ("Content-Type", "application/json");
-					exchange.sendResponseHeaders (response_code, 0);
-					final OutputStream os = exchange.getResponseBody();
-					os.write (response.getBytes());
-					os.flush();
-					os.close();
+					final ZMQ.Socket sock = this.context.socket (ZMQ.REQ);
+					final String identity = String.format ("%04X-%04X", this.rand.nextInt(), this.rand.nextInt());
+					try {
+						sock.setIdentity (identity.getBytes());
+						sock.connect ("inproc://rfa");
+LOG.trace ("{}: send http/{}", identity, request.toASCIIString());
+						sock.sendMore ("http");
+						sock.send (request.toASCIIString());
+LOG.trace ("{}: block on recvStr()", identity);
+						final int response_code = Integer.parseInt (sock.recvStr());
+						final String response = sock.recvStr();
+						enableCompressionIfSupported (exchange);
+						exchange.getResponseHeaders().set ("Content-Type", "application/json");
+						exchange.sendResponseHeaders (response_code, 0);
+						final OutputStream os = exchange.getResponseBody();
+						os.write (response.getBytes());
+						os.flush();
+						os.close();
+					} catch (Throwable t) {
+						LOG.trace ("{}: 500 Internal Error: {}", identity, t.getMessage());
+						exchange.sendResponseHeaders (HttpURLConnection.HTTP_INTERNAL_ERROR, 0);
+					} finally {
+						sock.close();
+					}
 				}
 			} else {
+				LOG.trace ("405 Bad Method.");
 				exchange.sendResponseHeaders (HttpURLConnection.HTTP_BAD_METHOD, 0);
 			}
 			exchange.close();
@@ -480,15 +495,16 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				final String identity = this.dispatcher.recvStr();
 				this.dispatcher.recv (0);		// envelope delimiter
 				String msg = this.dispatcher.recvStr();	// response
-				LOG.trace ("recv: {}", msg);
 				switch (msg) {
 				case "http":
-					this.dispatcher.sendMore (identity);
-					this.dispatcher.sendMore ("");
+					LOG.trace ("http: from {}", identity);
 					try {
 						final URI request = new URI (this.dispatcher.recvStr());
-						this.handler (request);
+						this.handler (request, identity);
 					} catch (Exception e) {
+						LOG.trace ("500 Internal Error.");
+						this.dispatcher.sendMore (identity);
+						this.dispatcher.sendMore ("");
 						this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_INTERNAL_ERROR));
 						this.dispatcher.send (Throwables.getStackTraceAsString (e));
 					}
@@ -520,11 +536,13 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private class Multipass implements AnalyticStreamDispatcher {
 		private final ImmutableSet<AnalyticStream> requests;
 		private final ZMQ.Socket dispatcher;
+		private final String identity;
 		private final Map<String, String> responses;
 
-		public Multipass (ImmutableSet<AnalyticStream> requests, ZMQ.Socket dispatcher) {
+		public Multipass (ImmutableSet<AnalyticStream> requests, ZMQ.Socket dispatcher, String identity) {
 			this.requests = requests;
 			this.dispatcher = dispatcher;
+			this.identity = identity;
 			this.responses = Maps.newTreeMap();
 		}
 
@@ -537,6 +555,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				return;
 			}
 			else if (1 == this.requests.size()) {
+LOG.trace ("http: send response {} to {}", response_code, this.identity);
+				this.dispatcher.sendMore (this.identity);
+				this.dispatcher.sendMore ("");
 				this.dispatcher.sendMore (Integer.toString (response_code));
 				this.dispatcher.send (stream_response);
 			}
@@ -546,18 +567,22 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 				final Joiner joiner = Joiner.on (",\n");
 				joiner.appendTo (sb, this.responses.values());
 				sb.append ("]");
+				this.dispatcher.sendMore (this.identity);
+				this.dispatcher.sendMore ("");
 				this.dispatcher.sendMore (Integer.toString (response_code));
 				this.dispatcher.send (sb.toString());
 			}
+/* complete, remove pass */
+			multipass.remove (this.identity);
 		}
 	}
 
 	@Override
 	public void dispatch (AnalyticStream stream, int response_code, String response) {
-		this.multipass.dispatch (stream, response_code, response);
+		this.multipass.get (stream.getIdentity()).dispatch (stream, response_code, response);
 	}
 
-	public Multipass multipass;
+	public Map<String, Multipass> multipass;
 
 // http://takoyaki/SBUX.O
 // http://takoyaki/MSFT.O?signal=MMA(21,Close())
@@ -574,7 +599,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 //   interval     - < iso 8601 interval >
 //   returnformat - [ perunit | decimal | percent | basispoints ]
 
-	private void handler (URI request) {
+	private void handler (URI request, String identity) {
 		LOG.info ("GET: {}", request.toASCIIString());
 		final Map<String, List<String>> query = parseQueryParameters (request.getQuery(), Charset.forName ("UTF-8"));
 		Optional<String> signal = Optional.absent();
@@ -615,8 +640,11 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					.split (new File (request.getPath()).getName()), String.class);
 		}
 		if (0 == items.length) {
+			LOG.trace ("400 Bad Request");
+			this.dispatcher.sendMore (identity);
+			this.dispatcher.sendMore ("");
 			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
-			this.dispatcher.send ("Invalid request.");
+			this.dispatcher.send ("No items requested.");
 			return;
 		} else if (!signal.isPresent() && !techanalysis.isPresent()) {
 // TBD: insert vanilla multi-pass here.
@@ -626,6 +654,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			}
 			this.consumer.batchCreateItemStream ("ELEKTRON_EDGE", items, DEFAULT_FIELDS, streams);
 			this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher); */
+			this.dispatcher.sendMore (identity);
+			this.dispatcher.sendMore ("");
 			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_NOT_IMPLEMENTED));
 			this.dispatcher.send ("Non-analytic data not implemented.");
 			return;
@@ -642,7 +672,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 							"SignalApp",
 							signal.get(),
 							items[i]);
-				streams[i] = new AnalyticStream (this);
+				streams[i] = new AnalyticStream (this, identity);
 			}
 		}
 		else
@@ -656,6 +686,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					sb.append (" datetime=")
 					  .append (parsed_datetime.withZone (DateTimeZone.UTC).toString());
 				} catch (IllegalArgumentException e) {
+					LOG.trace ("400 Bad Request");
+					this.dispatcher.sendMore (identity);
+					this.dispatcher.sendMore ("");
 					this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
 					this.dispatcher.send ("datetime: " + e.getMessage());
 					return;
@@ -674,6 +707,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 							lagtype = Optional.of ("second");
 							lag = Optional.of (Long.toString (duration.getStandardSeconds()));
 						} catch (IllegalArgumentException e) {
+							LOG.trace ("400 Bad Request");
+							this.dispatcher.sendMore (identity);
+							this.dispatcher.sendMore ("");
 							this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
 							this.dispatcher.send ("lag: " + e.getMessage());
 							return;
@@ -694,6 +730,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					  .append (parsed_interval.getEnd().toDateTime (DateTimeZone.UTC).toString())
 					  .append (" returnmode=historical");
 				} catch (IllegalArgumentException e) {
+					LOG.trace ("400 Bad Request");
+					this.dispatcher.sendMore (identity);
+					this.dispatcher.sendMore ("");
 					this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
 					this.dispatcher.send ("interval: " + e.getMessage());
 					return;
@@ -711,11 +750,11 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 							"TechAnalysis",
 							analytic,
 							items[i]);
-				streams[i] = new AnalyticStream (this);
+				streams[i] = new AnalyticStream (this, identity);
 			}
 		}
 		this.analytic_consumer.batchCreateAnalyticStream (analytics, streams);
-		this.multipass = new Multipass (ImmutableSet.copyOf (streams), this.dispatcher);
+		this.multipass.put (identity, new Multipass (ImmutableSet.copyOf (streams), this.dispatcher, identity));
 	}
 
 	private void clear() {

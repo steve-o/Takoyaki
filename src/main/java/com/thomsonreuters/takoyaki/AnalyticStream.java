@@ -26,6 +26,9 @@ public class AnalyticStream {
 /* Dispatcher for stream updates */
 	private AnalyticStreamDispatcher dispatcher;
 
+/* Custom identifier */
+	private String identity;
+
 	private Optional<Integer> stream_id;
 	private int command_id;
 	private Handle timer_handle;
@@ -33,8 +36,9 @@ public class AnalyticStream {
 
 	private boolean is_closed;
 
-	public AnalyticStream (AnalyticStreamDispatcher dispatcher) {
+	public AnalyticStream (AnalyticStreamDispatcher dispatcher, String identity) {
 		this.dispatcher = dispatcher;
+		this.identity = identity;
 		this.clearStreamId();
 		this.clearCommandId();
 		this.clearTimerHandle();
@@ -76,6 +80,10 @@ public class AnalyticStream {
 
 	public AnalyticStreamDispatcher getDispatcher() {
 		return this.dispatcher;
+	}
+
+	public String getIdentity() {
+		return this.identity;
 	}
 
 	public Integer getStreamId() {
