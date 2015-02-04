@@ -86,7 +86,6 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String UUID_PARAM			= "uuid";
 
 	private static final String SIGNAL_PARAM		= "signal";
-	private static final String TECHANALYSIS_PARAM		= "analytic";
 	private static final String DATETIME_PARAM		= "datetime";
 	private static final String TIMEINTERVAL_PARAM		= "interval";
 	private static final String SNAPBY_PARAM		= "snapby";
@@ -345,6 +344,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 
 		@Override
 		public void handle (HttpExchange exchange) throws IOException {
+			exchange.getResponseHeaders().set ("Access-Control-Allow-Origin", "*");
+			exchange.getResponseHeaders().set ("Access-Control-Allow-Headers", "Content-Type");
+			exchange.getResponseHeaders().set ("Access-Control-Allow-Methods", "GET");
 			if (exchange.getRequestMethod().equals("GET")) {
 				final URI request = exchange.getRequestURI();
 				final String path = request.getPath();
@@ -587,9 +589,9 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 // http://takoyaki/SBUX.O
 // http://takoyaki/MSFT.O?signal=MMA(21,Close())
 // http://takoyaki/MSFT.O,GOOG.O?signal=MMA(21,Close())
-// http://takoyaki/SBUX.O?analytic=taqfromdatetime&datetime=2014-11-20T19:00:00.000Z
+// http://takoyaki/SBUX.O/taqfromdatetime?datetime=2014-11-20T19:00:00.000Z
 // --> #type=taqfromdatetime datetime=2014-11-20T19:00:00.000Z
-// http://takoyaki/SBUX.O?analytic=tradeperformancespread&interval=2014-11-24T17:05:15.444Z/PT2M&returnformat=perunit
+// http://takoyaki/SBUX.O/tradeperformancespread?interval=2014-11-24T17:05:15.444Z/PT2M&returnformat=perunit
 // --> #type=tradeperformancespread startdatetime=2014-11-24T17:05:15.444Z enddatetime=2014-11-24T17:07:15.444Z returnmode=historical returnformat=perunit
 
 // supported parameters:
@@ -607,11 +609,30 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 		Optional<String> timeinterval = Optional.absent(), returnformat = Optional.absent();
 		String[] items = {};
 /* Validate each parameter */
-		if (query.containsKey (SIGNAL_PARAM)) {
+		if (query.containsKey (SIGNAL_PARAM))
+		{
+/* Signals app */
 			signal = Optional.of (getParameterValue (query, SIGNAL_PARAM));
+/* ticker symbols */
+			if (!Strings.isNullOrEmpty (request.getPath())
+				&& request.getPath().length() > 1)
+			{
+				items = Iterables.toArray (Splitter.on (',')
+						.trimResults()
+						.omitEmptyStrings()
+						.split (new File (request.getPath()).getName()), String.class);
+			}
 		}
-		if (query.containsKey (TECHANALYSIS_PARAM)) {
-			techanalysis = Optional.of (getParameterValue (query, TECHANALYSIS_PARAM));
+		else if (!Strings.isNullOrEmpty (request.getPath())
+				&& request.getPath().length() > 1)
+		{
+/* TechAnalysis app */
+			File path = new File (request.getPath());
+			items = Iterables.toArray (Splitter.on (',')
+					.trimResults()
+					.omitEmptyStrings()
+					.split (path.getParentFile().getName()), String.class);
+			techanalysis = Optional.of (path.getName());
 			if (query.containsKey (DATETIME_PARAM)) {
 				datetime = Optional.of (getParameterValue (query, DATETIME_PARAM));
 			}
@@ -630,14 +651,6 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			if (query.containsKey (RETURNFORMAT_PARAM)) {
 				returnformat = Optional.of (getParameterValue (query, RETURNFORMAT_PARAM));
 			}
-		}
-		if (!Strings.isNullOrEmpty (request.getPath())
-			&& request.getPath().length() > 1)
-		{
-			items = Iterables.toArray (Splitter.on (',')
-					.trimResults()
-					.omitEmptyStrings()
-					.split (new File (request.getPath()).getName()), String.class);
 		}
 		if (0 == items.length) {
 			LOG.trace ("400 Bad Request");
