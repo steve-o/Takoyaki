@@ -24,6 +24,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.google.common.io.CharStreams;
+import com.google.common.net.HostAndPort;
 import com.google.common.primitives.UnsignedInteger;
 import org.joda.time.format.DateTimeFormatter;
 import org.joda.time.format.ISODateTimeFormat;
@@ -93,6 +95,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String LAG_PARAM			= "lag";
 	private static final String RETURNFORMAT_PARAM		= "returnformat";
 
+	private static final String LISTEN_OPTION		= "listen";
 	private static final String SESSION_OPTION		= "session";
 	private static final String HELP_OPTION			= "help";
 	private static final String VERSION_OPTION		= "version";
@@ -102,6 +105,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String CONSUMER_NAME		= "Consumer";
 
 	private static final String[] DEFAULT_FIELDS = { "OPEN_PRC", "HIGH_1", "LOW_1", "HST_CLOSE", "ACVOL_1", "NUM_MOVES" };
+	private static final int DEFAULT_PORT			= 8000;
 
 	private static Options buildOptions() {
 		Options opts = new Options();
@@ -123,6 +127,13 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					.withLongOpt (SESSION_OPTION)
 					.create();
 		opts.addOption (session);
+
+		Option listen = OptionBuilder.hasArg()
+					.withArgName ("hostname")
+					.withDescription ("HTTP hostname")
+					.withLongOpt (LISTEN_OPTION)
+					.create();
+		opts.addOption (listen);
 
 		return opts;
 	}
@@ -282,6 +293,14 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			}
 		}
 
+		if (line.hasOption (LISTEN_OPTION)) {
+			final HostAndPort hp = HostAndPort.fromString (line.getOptionValue (LISTEN_OPTION)).withDefaultPort (DEFAULT_PORT);
+			this.config.setHostAndPort (hp);
+		} else {
+			final HostAndPort hp = HostAndPort.fromParts (InetAddress.getLocalHost().getHostName(), DEFAULT_PORT);
+			this.config.setHostAndPort (hp);
+		}
+
 		LOG.debug (this.config.toString());
 
 /* ZeroMQ Context. */
@@ -316,7 +335,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.analytic_consumer.init();
 
 /* HTTP server */
-		this.http_server = HttpServer.create (new InetSocketAddress (8000), 0);
+		this.http_server = HttpServer.create (new InetSocketAddress (this.config.getHostAndPort().getPort()), 0);
 		this.http_handler = new MyHandler (this.zmq_context);
 		this.http_context = this.http_server.createContext ("/", this.http_handler);
 
@@ -354,6 +373,18 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					LOG.trace ("404 Not Found.");
 					exchange.getResponseHeaders().set ("Cache-Control", "public, max-age=691200");
 					exchange.sendResponseHeaders (HttpURLConnection.HTTP_NOT_FOUND, 0);
+				} else if (path.equalsIgnoreCase ("/api-docs")) {
+					enableCompressionIfSupported (exchange);
+					exchange.getResponseHeaders().set ("Cache-Control", "public, max-age=691200");
+					exchange.getResponseHeaders().set ("Content-Type", "application/json");
+					exchange.sendResponseHeaders (HttpURLConnection.HTTP_OK, 0);
+					final InputStream in = getClass().getResourceAsStream ("/swagger.json");
+					final OutputStream os = exchange.getResponseBody();
+					final String template = CharStreams.toString (new BufferedReader (new InputStreamReader (in)));
+					in.close();
+					os.write (template.replace ("${HOST}", config.getHostAndPort().toString()).getBytes());
+					os.flush();
+					os.close();
 				} else {
 					final ZMQ.Socket sock = this.context.socket (ZMQ.REQ);
 					final String identity = String.format ("%04X-%04X", this.rand.nextInt(), this.rand.nextInt());
@@ -365,6 +396,7 @@ LOG.trace ("{}: send http/{}", identity, request.toASCIIString());
 						sock.send (request.toASCIIString());
 LOG.trace ("{}: block on recvStr()", identity);
 						final int response_code = Integer.parseInt (sock.recvStr());
+LOG.trace ("{}: response HTTP/{}", identity, response_code);
 						final String response = sock.recvStr();
 						enableCompressionIfSupported (exchange);
 						exchange.getResponseHeaders().set ("Content-Type", "application/json");
@@ -403,6 +435,7 @@ LOG.trace ("{}: block on recvStr()", identity);
 		}
 		@Override
 		public void run() {
+			setName ("shutdown");
 			if (null != this.app
 				&& null != this.app.event_queue
 				&& this.app.event_queue.isActive())

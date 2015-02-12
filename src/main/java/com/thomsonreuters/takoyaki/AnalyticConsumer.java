@@ -3,6 +3,8 @@
 
 package com.thomsonreuters.Takoyaki;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -89,6 +91,7 @@ import com.thomsonreuters.rfa.valueadd.domainrep.ResponseStatus;
 public class AnalyticConsumer implements Client {
 	private static Logger LOG = LogManager.getLogger (Consumer.class.getName());
 	private static final Marker SHOGAKOTTO_MARKER = MarkerManager.getMarker ("SHOGAKOTTO");
+	private static final String LINE_SEPARATOR = System.getProperty ("line.separator");
 
 	private SessionConfig config;
 
@@ -212,7 +215,12 @@ public class AnalyticConsumer implements Client {
 			} else {
 				ommItemIntSpec.setMsg (msg);
 			}
-GenericOMMParser.parse (msg);
+			if (LOG.isDebugEnabled()) {
+				ByteArrayOutputStream baos = new ByteArrayOutputStream();
+				PrintStream ps = new PrintStream (baos);
+				GenericOMMParser.parseMsg (msg, ps);
+				LOG.debug ("Private stream request:{}{}", LINE_SEPARATOR, baos.toString());
+			}
 			this.private_stream = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
 			this.omm_pool.releaseMsg (msg);
 		}
@@ -344,7 +352,12 @@ GenericOMMParser.parse (msg);
 
 			OMMHandleItemCmd cmd = new OMMHandleItemCmd();
 			cmd.setMsg ((OMMMsg)this.omm_encoder2.getEncodedObject());
-GenericOMMParser.parse (cmd.getMsg());
+			if (LOG.isDebugEnabled()) {
+				ByteArrayOutputStream baos = new ByteArrayOutputStream();
+				PrintStream ps = new PrintStream (baos);
+				GenericOMMParser.parseMsg (cmd.getMsg(), ps);
+				LOG.debug ("Generic message:{}{}", LINE_SEPARATOR, baos.toString());
+			}
 			cmd.setHandle (stream_handle);
 			final int command_id = this.omm_consumer.submit (cmd, closure);
 			this.omm_pool.releaseMsg (msg);
@@ -436,8 +449,13 @@ GenericOMMParser.parse (cmd.getMsg());
 		}
 
 		private void OnGenericMsg (OMMMsg msg, Handle handle, Object closure) {
-GenericOMMParser.parse (msg);
 			LOG.trace ("OnGenericMsg: {}", msg);
+			if (LOG.isDebugEnabled()) {
+				ByteArrayOutputStream baos = new ByteArrayOutputStream();
+				PrintStream ps = new PrintStream (baos);
+				GenericOMMParser.parseMsg (msg, ps);
+				LOG.debug ("Generic message:{}{}", LINE_SEPARATOR, baos.toString());
+			}
 /* Forward all MMT_ANALYTICS encapsulated messages */
 			switch (msg.getMsgModelType()) {
 			case 30 /* RDMMsgTypes.ANALYTICS */:
@@ -740,7 +758,12 @@ GenericOMMParser.parse (msg);
 		}
 
 		private void OnAppResponse (OMMMsg msg, Handle handle, Object closure) {
-GenericOMMParser.parse (msg);
+			if (LOG.isDebugEnabled()) {
+				ByteArrayOutputStream baos = new ByteArrayOutputStream();
+				PrintStream ps = new PrintStream (baos);
+				GenericOMMParser.parseMsg (msg, ps);
+				LOG.debug ("App response:{}{}", LINE_SEPARATOR, baos.toString());
+			}
 			final AppLoginResponse response = new AppLoginResponse (msg);
 			final byte stream_state = response.getRespStatus().getStreamState();
 			final byte data_state   = response.getRespStatus().getDataState();
@@ -1424,8 +1447,12 @@ GenericOMMParser.parse (msg);
 
 	private void OnLoginResponse (OMMMsg msg) {
 		LOG.trace ("OnLoginResponse: {}", msg);
-/* RFA example helper to dump incoming message. */
-//GenericOMMParser.parse (msg);
+		if (LOG.isDebugEnabled()) {
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			PrintStream ps = new PrintStream (baos);
+			GenericOMMParser.parseMsg (msg, ps);
+			LOG.debug ("Login response:{}{}", LINE_SEPARATOR, baos.toString());
+		}
 		final RDMLoginResponse response = new RDMLoginResponse (msg);
 		final byte stream_state = response.getRespStatus().getStreamState();
 		final byte data_state   = response.getRespStatus().getDataState();
@@ -1485,7 +1512,12 @@ GenericOMMParser.parse (msg);
  */
 	private void OnDirectoryResponse (OMMMsg msg) {
 		LOG.trace ("OnDirectoryResponse: {}", msg);
-GenericOMMParser.parse (msg);
+		if (LOG.isDebugEnabled()) {
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			PrintStream ps = new PrintStream (baos);
+			GenericOMMParser.parseMsg (msg, ps);
+			LOG.debug ("Directory response:{}{}", LINE_SEPARATOR, baos.toString());
+		}
 
 // We only desire a single directory response with UP status to request dictionaries, ignore all other updates */
 		if (!this.pending_directory)
@@ -1596,7 +1628,9 @@ GenericOMMParser.parse (msg);
 		}
 
 		if (0 == this.dictionary_handle.size()) {
-			GenericOMMParser.initializeDictionary (this.rdm_dictionary.getFieldDictionary());
+			if (LOG.isDebugEnabled()) {
+				GenericOMMParser.initializeDictionary (this.rdm_dictionary.getFieldDictionary());
+			}
 			LOG.trace ("All dictionaries loaded, resuming subscriptions.");
 			this.pending_dictionary = false;
 			this.resubscribe();
@@ -1648,7 +1682,9 @@ GenericOMMParser.parse (msg);
 				LOG.trace ("RDM enumerated tables version: {}", field_dictionary.getEnumProperty ("DT_Version"));
 			}
 /* Notify RFA example helper of dictionary if using to dump message content. */
-			GenericOMMParser.initializeDictionary (field_dictionary);
+			if (LOG.isDebugEnabled()) {
+				GenericOMMParser.initializeDictionary (field_dictionary);
+			}
 			this.dictionary_handle.get ((String)closure).setFlag();
 
 /* Check all pending dictionaries */
@@ -1678,7 +1714,6 @@ GenericOMMParser.parse (msg);
 /* MMT_MARKETPRICE domain.
  */
 	private void OnMarketPrice (OMMMsg msg) {
-GenericOMMParser.parse (msg);
 	}
 
 }

@@ -1,5 +1,8 @@
 #!/bin/sh
 
+HOSTNAME=
+HOSTNAME=nylabdev5:8000
+
 # DACS login username, credentials define available services and usage limits.
 DACS=
 DACS=signals
@@ -27,6 +30,7 @@ RETRY_TIMER="15"
 RETRY_LIMIT="0"
 #RETRY_TIMER=
 
+################################################################################
 ## -- end config --
 
 # RSSL-only
@@ -38,6 +42,10 @@ test -n "$DICTIONARY_OVERRIDE" && SESSION="$SESSION&dictionary=$DICTIONARY_OVERR
 test -n "$RETRY_TIMER" && SESSION="$SESSION&retry-timer=$RETRY_TIMER"
 test -n "$RETRY_LIMIT" && SESSION="$SESSION&retry-limit=$RETRY_LIMIT"
 
+LISTEN=""
+test -n "$HOSTNAME" && LISTEN="--listen=$HOSTNAME"
+
 ./takoyaki.sh \
-	"--session=$SESSION"
+	"--session=$SESSION" \
+	$LISTEN
 

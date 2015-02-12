@@ -8,7 +8,7 @@ ENABLEASSERTIONS=-enableassertions
 #ENABLEASSERTIONS=
 
 TAKOYAKI=target/classes
-TAKOYAKI=target/Takoyaki-3.0-SNAPSHOT.jar
+TAKOYAKI=target/Takoyaki-3.1-SNAPSHOT.jar
 
 # Apache Commons command-line-processor
 COMMONSCLI=commons-cli-1.2.jar
@@ -30,7 +30,7 @@ LOG4J2=$LOG4J2:$SLF4JBINDING:$SLF4JAPI:$JAVAUTILLOGGINGAPI
 DISRUPTOR=disruptor-3.2.1.jar
 LOG4J2=$LOG4J2:$DISRUPTOR
 ENABLEDISRUPTOR=-DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector
-ENABLEDISRUPTOR=
+##ENABLEDISRUPTOR=
 
 # Thomson Reuters RFA and ValueAdd libraries
 RFA=rfa.jar

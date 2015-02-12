@@ -3,6 +3,7 @@
 
 package com.thomsonreuters.Takoyaki;
 
+import com.google.common.net.HostAndPort;
 import com.google.gson.Gson;
 
 public class Config {
@@ -16,6 +17,9 @@ public class Config {
 
 //  RFA event queue name.
 	private String event_queue_name = "EventQueueName";
+
+// HTTP listening address
+	private HostAndPort host_port;
 
 	public SessionConfig[] getSessions() {
 		return this.sessions;
@@ -35,6 +39,14 @@ public class Config {
 
 	public String getEventQueueName() {
 		return this.event_queue_name;
+	}
+
+	public void setHostAndPort (HostAndPort host_port) {
+		this.host_port = host_port;
+	}
+
+	public HostAndPort getHostAndPort() {
+		return this.host_port;
 	}
 
 	@Override
