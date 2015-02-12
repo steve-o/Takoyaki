@@ -1,0 +1,375 @@
+{
+	"swagger": "2.0",
+	"info": {
+		"title": "Thomson Reuters Analytics Cloud",
+		"version": "2.0"
+	},
+	"host": "${HOST}",
+	"basePath": "/v2",
+	"schemes": [
+		"http"
+	],
+	"produces": [
+		"application/json"
+	],
+	"paths": {
+		"/{ticker}/taqfromdatetime": {
+			"get": {
+				"tags": [
+					"Analytics"
+				],
+				"summary": "TAQ from Datetime",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "datetime",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"format": "date-time",
+						"description": "ISO 8601 combined date and time.",
+						"default": "2014-11-20T19:00:00.000Z"
+					},
+					{
+						"name": "lagtype",
+						"in": "query",
+						"required": false,
+						"type": "string",
+						"enum": [
+							"trade",
+							"quote",
+							"volume",
+							"duration"
+						],
+						"description": "The units of the Lag parameter."
+					},
+					{
+						"name": "lag",
+						"in": "query",
+						"required": false,
+						"type": "string",
+						"description": "Offset the specified trade or quote date and time by the specified number of units."
+					},
+					{
+						"name": "snapby",
+						"in": "query",
+						"required": false,
+						"type": "string",
+						"enum": [
+							"time",
+							"trade",
+							"quote"
+						],
+						"description": "Order of trade and quote information retrieved relative to the date and time."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/taq"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/tradeperformancespread": {
+			"get": {
+				"tags": [
+					"Analytics"
+				],
+				"summary": "Trade Performance Spread",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "string",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 time interval.",
+						"default": "2014-11-24T17:05:15.444Z/PT10S"
+					},
+					{
+						"name": "returnformat",
+						"in": "query",
+						"required": false,
+						"type": "string",
+						"enum": [
+							"perunit",
+							"decimal",
+							"percent",
+							"basispoints"
+						],
+						"description": "Results per unit (e.g. per share), in decimal, in percent, or in basis points."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/tradeperformancespread"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}?signal={signal}": {
+			"get": {
+				"tags": [
+					"Signals"
+				],
+				"summary": "Signal Formula",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "string",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "signal",
+						"in": "path",
+						"required": true,
+						"type": "string",
+						"description": "Signal formula.",
+						"default": "MMA(21,Close())"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/signal"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		}
+	},
+	"definitions": {
+		"taq": {
+			"required": [
+				"recordname",
+				"query",
+				"bidPrice",
+				"bidSize",
+				"bidtime",
+				"askPrice",
+				"askSize",
+				"asktime",
+				"tradePrice",
+				"tradeSize",
+				"tradetime"
+			],
+			"properties": {
+				"recordname": {
+					"type": "string"
+				},
+				"query": {
+					"type": "string"
+				},
+				"bidPrice": {
+					"type": "number",
+					"format": "double"
+				},
+				"bidSize": {
+					"type": "integer",
+					"format": "int64"
+				},
+				"bidtime": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"askPrice": {
+					"type": "number",
+					"format": "double"
+				},
+				"askSize": {
+					"type": "integer",
+					"format": "int64"
+				},
+				"asktime": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"tradePrice": {
+					"type": "number",
+					"format": "double"
+				},
+				"tradeSize": {
+					"type": "integer",
+					"format": "int64"
+				},
+				"tradetime": {
+					"type": "string",
+					"format": "date-time"
+				}
+			}
+		},
+		"tradeperformancespread": {
+			"required": [
+				"recordname",
+				"query",
+				"timeseries"
+			],
+			"properties": {
+				"recordname": {
+					"type": "string"
+				},
+				"query": {
+					"type": "string"
+				},
+				"timeseries": {
+					"type": "array",
+					"items": [
+						{
+							"type": "array",
+							"items": {
+								"type": "string",
+								"format": "date-time"
+							}
+						},
+						{
+							"type": "array",
+							"items": {
+								"type": "number",
+								"format": "double"
+							}
+						}
+					]
+				}
+			}
+		},
+		"signal": {
+			"required": [
+				"recordname",
+				"query",
+				"MET_VAL"
+			],
+			"properties": {
+				"recordname": {
+					"type": "string"
+				},
+				"query": {
+					"type": "string"
+				},
+				"MET_VAL": {
+					"type": "number"
+				}
+			}
+		},
+		"status": {
+			"required": [
+				"type",
+				"service",
+				"app",
+				"recordname",
+				"query",
+				"stream",
+				"data",
+				"code",
+				"text"
+			],
+			"properties" : {
+				"type": {
+					"type": "string"
+				},
+				"service": {
+					"type": "string"
+				},
+				"app": {
+					"type": "string"
+				},
+				"recordname": {
+					"type": "string"
+				},
+				"query": {
+					"type": "string"
+				},
+				"stream": {
+					"type": "string"
+				},
+				"data": {
+					"type": "string"
+				},
+				"code": {
+					"type": "string"
+				},
+				"text": {
+					"type": "string"
+				}
+			}
+		}
+	}
+}
