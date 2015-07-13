@@ -198,23 +198,23 @@ public class AnalyticConsumer implements Client {
 				this.app_name, this.service_name);
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
-			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
+			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
 			msg.setAssociatedMetaInfo (this.login_handle);
 			msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
-			msg.setAttribInfo (this.service_name, this.app_name, AppLogin.NameType.getValue (AppLogin.NameType.APP));
+			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
+			attribInfo.setServiceName (this.service_name);
+			attribInfo.setName (this.uuid);
+			msg.setAttribInfo (attribInfo);
+			this.omm_pool.releaseAttribInfo (attribInfo);
 			OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-			if (!this.uuid.isEmpty()) {
 /* Authorization for the app */
-				this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-				this.omm_encoder.encodeMsgInit (msg, OMMTypes.ELEMENT_LIST, OMMTypes.NO_DATA);
-				this.omm_encoder.encodeElementListInit (OMMElementList.HAS_STANDARD_DATA, (short)0, (short)0);
-				this.omm_encoder.encodeElementEntryInit ("UUID", OMMTypes.ASCII_STRING);
-				this.omm_encoder.encodeString (this.uuid, OMMTypes.ASCII_STRING);
-				this.omm_encoder.encodeAggregateComplete();
-				ommItemIntSpec.setMsg ((OMMMsg)this.omm_encoder.getEncodedObject());
-			} else {
-				ommItemIntSpec.setMsg (msg);
-			}
+			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
+			this.omm_encoder.encodeMsgInit (msg, OMMTypes.ELEMENT_LIST, OMMTypes.NO_DATA);
+			this.omm_encoder.encodeElementListInit (OMMElementList.HAS_STANDARD_DATA, (short)0, (short)0);
+			this.omm_encoder.encodeElementEntryInit ("Name", OMMTypes.ASCII_STRING);
+			this.omm_encoder.encodeString (this.uuid, OMMTypes.ASCII_STRING);
+			this.omm_encoder.encodeAggregateComplete();
+			ommItemIntSpec.setMsg ((OMMMsg)this.omm_encoder.getEncodedObject());
 			if (LOG.isDebugEnabled()) {
 				ByteArrayOutputStream baos = new ByteArrayOutputStream();
 				PrintStream ps = new PrintStream (baos);
@@ -290,22 +290,29 @@ public class AnalyticConsumer implements Client {
 			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
 			msg.setAssociatedMetaInfo (this.private_stream);
 // TBD: SignalsApp does not support snapshot requests.
-			if (stream.getAppName().equals ("SignalApp")) {
+			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
+			attribInfo.setNameType ((short)0x1 /* RIC */);
+			attribInfo.setId (0x1 /* TechAnalysis */);
+			if (!stream.getQuery().startsWith ("#type=")) {
 				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
-				msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
+				attribInfo.setName (stream.getItemName());
 			} else {
 				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
 				sb.setLength (0);
 				sb.append ("/").append (stream.getItemName());
-				msg.setAttribInfo (null, sb.toString(), (short)0x1 /* RIC */);
+				attribInfo.setName (sb.toString());
 			}
+			msg.setAttribInfo (attribInfo);
+			this.omm_pool.releaseAttribInfo (attribInfo);
 
 /* OMMAttribInfo.Attrib as an OMMElementList */
 			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-			this.omm_encoder.encodeMsgInit (msg, OMMTypes.ELEMENT_LIST, OMMTypes.NO_DATA);
-			this.omm_encoder.encodeElementListInit (OMMElementList.HAS_STANDARD_DATA, (short)0, (short)0);
-			this.omm_encoder.encodeElementEntryInit ("Query", OMMTypes.ASCII_STRING);
-			this.omm_encoder.encodeString (stream.getQuery(), OMMTypes.ASCII_STRING);
+			this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
+			this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
+			this.omm_encoder.encodeFieldEntryInit ((short)32650, OMMTypes.RMTES_STRING);
+			this.omm_encoder.encodeString (stream.getQuery(), OMMTypes.RMTES_STRING);
+			this.omm_encoder.encodeFieldEntryInit ((short)12069, OMMTypes.RMTES_STRING);
+			this.omm_encoder.encodeString (this.uuid, OMMTypes.RMTES_STRING);
 			this.omm_encoder.encodeAggregateComplete();
 
 			stream.setCommandId (this.sendGenericMsg ((OMMMsg)this.omm_encoder.getEncodedObject(), this.private_stream, stream));
@@ -341,7 +348,7 @@ public class AnalyticConsumer implements Client {
 			LOG.trace ("Sending generic message request.");
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setMsgType (OMMMsg.MsgType.GENERIC);
-			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
+			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
 			msg.setAssociatedMetaInfo (stream_handle);
 			msg.setIndicationFlags (OMMMsg.Indication.GENERIC_COMPLETE);
 
@@ -438,7 +445,7 @@ public class AnalyticConsumer implements Client {
 		private void OnRespMsg (OMMMsg msg, Handle handle, Object closure) {
 			LOG.trace ("OnRespMsg: {}", msg);
 			switch (msg.getMsgModelType()) {
-			case 30 /* RDMMsgTypes.ANALYTICS */:
+			case 127 /* RDMMsgTypes.SYSTEM */:
 				this.OnAppResponse (msg, handle, closure);
 				break;
 
@@ -458,7 +465,7 @@ public class AnalyticConsumer implements Client {
 			}
 /* Forward all MMT_ANALYTICS encapsulated messages */
 			switch (msg.getMsgModelType()) {
-			case 30 /* RDMMsgTypes.ANALYTICS */:
+			case 127 /* RDMMsgTypes.SYSTEM */:
 				if (msg.getDataType() == OMMTypes.MSG) {
 					this.OnAnalyticsMsg ((OMMMsg)msg.getPayload(), handle, closure);
 					break;

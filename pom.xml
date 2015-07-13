@@ -6,7 +6,7 @@
 
   <groupId>com.thomsonreuters</groupId>
   <artifactId>Takoyaki</artifactId>
-  <version>3.1-SNAPSHOT</version>
+  <version>4.0-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>Takoyaki</name>

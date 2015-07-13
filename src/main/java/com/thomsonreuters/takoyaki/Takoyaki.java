@@ -715,7 +715,7 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			for (int i = 0; i < streams.length; ++i) {
 				LOG.trace ("item[{}]: {}", i, items[i]);
 				analytics[i] = new Analytic ("ECP_SAP",
-							"SignalApp",
+							"TechAnalysis",
 							signal.get(),
 							items[i]);
 				streams[i] = new AnalyticStream (this, identity);
