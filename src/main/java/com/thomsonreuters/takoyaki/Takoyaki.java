@@ -86,6 +86,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static final String RETRY_TIMER_PARAM		= "retry-timer";
 	private static final String RETRY_LIMIT_PARAM		= "retry-limit";
 	private static final String UUID_PARAM			= "uuid";
+	private static final String PASSWORD_PARAM		= "password";
 
 	private static final String SIGNAL_PARAM		= "signal";
 	private static final String DATETIME_PARAM		= "datetime";
@@ -283,6 +284,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					session_config.setRetryLimit (getParameterValue (query, RETRY_LIMIT_PARAM));
 				if (query.containsKey (UUID_PARAM))
 					session_config.setUuid (getParameterValue (query, UUID_PARAM));
+				if (query.containsKey (PASSWORD_PARAM))
+					session_config.setPassword (getParameterValue (query, PASSWORD_PARAM));
 
 				LOG.debug ("Session evaluation: {}", session_config.toString());
 				session_configs.add (session_config);
@@ -627,6 +630,9 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 // http://takoyaki/SBUX.O/tradeperformancespread?interval=2014-11-24T17:05:15.444Z/PT2M&returnformat=perunit
 // --> #type=tradeperformancespread startdatetime=2014-11-24T17:05:15.444Z enddatetime=2014-11-24T17:07:15.444Z returnmode=historical returnformat=perunit
 
+// http://takoyaki/SBUX.O/tas?interval=2014-11-24T17:05:15.444Z/PT2M
+// http://takoyaki/SBUX.O/taq?interval=2014-11-24T17:05:15.444Z/PT2M
+
 // supported parameters:
 //   snapby       - [ time | trade | quote ]
 //   lagtype      - [ trade | quote | second | minute | hour | volume | duration ]
@@ -703,7 +709,7 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			this.dispatcher.sendMore (identity);
 			this.dispatcher.sendMore ("");
 			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_NOT_IMPLEMENTED));
-			this.dispatcher.send ("Non-analytic data not implemented.");
+			this.dispatcher.send ("Not implemented.");
 			return;
 		}
 /* Build up batch request */
@@ -718,6 +724,40 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 							"TechAnalysis",
 							signal.get(),
 							items[i]);
+				streams[i] = new AnalyticStream (this, identity);
+			}
+		}
+		else if ("tas".equals (techanalysis.get())
+			|| "taq".equals (techanalysis.get()))
+		{
+			Interval parsed_interval;
+			if (timeinterval.isPresent()) {
+				try {
+					parsed_interval = Interval.parse (timeinterval.get());
+				} catch (IllegalArgumentException e) {
+					LOG.trace ("400 Bad Request");
+					this.dispatcher.sendMore (identity);
+					this.dispatcher.sendMore ("");
+					this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
+					this.dispatcher.send ("interval: " + e.getMessage());
+					return;
+				}
+			} else {
+				LOG.trace ("400 Bad Request");
+				this.dispatcher.sendMore (identity);
+				this.dispatcher.sendMore ("");
+				this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_BAD_REQUEST));
+				this.dispatcher.send ("Interval parameter required for historical requests.");
+				return;
+			}
+			LOG.trace ("history: {}", techanalysis.get());
+			for (int i = 0; i < streams.length; ++i) {
+				LOG.trace ("item[{}]: {}", i, items[i]);
+				analytics[i] = new Analytic ("ELEKTRON_AUX_TEST",
+							"History",
+							techanalysis.get(),
+							items[i]);
+				analytics[i].setInterval (parsed_interval);
 				streams[i] = new AnalyticStream (this, identity);
 			}
 		}

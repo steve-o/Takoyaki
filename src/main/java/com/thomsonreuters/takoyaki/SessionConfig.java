@@ -71,6 +71,10 @@ public class SessionConfig {
  */
 	private Optional<String> uuid;
 
+/* App server login password.
+ */
+	private Optional<String> password;
+
 	public SessionConfig (String session_name, String connection_name, String consumer_name, String protocol, String[] servers) {
 		this.session_name = session_name;
 		this.connection_name = connection_name;
@@ -88,6 +92,7 @@ public class SessionConfig {
 		this.retry_timer = Optional.absent();
 		this.retry_limit = Optional.absent();
                 this.uuid = Optional.absent();
+                this.password = Optional.absent();
 	}
 
 	public String getSessionName() {
@@ -241,6 +246,18 @@ public class SessionConfig {
                 
 	public void setUuid (String uuid) {
 		this.uuid = Optional.of (uuid);
+	}
+
+	public boolean hasPassword() {
+		return this.password.isPresent();
+	}
+
+	public String getPassword() {
+		return this.password.get();
+	}
+
+	public void setPassword (String password) {
+		this.password = Optional.of (password);
 	}
 
 	@Override

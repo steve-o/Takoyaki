@@ -18,8 +18,11 @@ public class Rfa {
 	private Config config;
 	private ConfigDb rfa_config;
 
-	private static final String RSSL_PROTOCOL       = "rssl";
-	private static final String SSLED_PROTOCOL      = "ssled";
+	private static final String RSSL_PROTOCOL	= "rssl";
+	private static final String SSLED_PROTOCOL	= "ssled";
+
+	private static final boolean RSSL_TRACE		= true;
+	private static final boolean RSSL_MOUNT_TRACE	= false;
 
 	public Rfa (Config config) {
 		this.config = config;
@@ -61,6 +64,7 @@ public class Rfa {
 /* Logging per connection */
 			name = "/Connections/" + connection_name + "/logFileName";
 			value = "none";
+			value = "/tmp/rfa.log";
 			staging.addVariable (fixRfaStringPath (name), value);
 /* List of servers */
 			name = "/Connections/" + connection_name + "/serverList";
@@ -79,6 +83,17 @@ public class Rfa {
 			{
 				value = "RSSL";
 				staging.addVariable (fixRfaStringPath (name), value);
+
+				if (RSSL_TRACE) {
+					name = "/Connections/" + connection_name + "/ipcTraceFlags";
+					value = "31";
+					staging.addVariable (fixRfaStringPath (name), value);
+				}
+				if (RSSL_MOUNT_TRACE) {
+					name = "/Connections/" + connection_name + "/mountTrace";
+					value = "True";
+					staging.addVariable (fixRfaStringPath (name), value);
+				}
 			}
 			else if (session_config.getProtocol().equalsIgnoreCase (SSLED_PROTOCOL))
 			{

@@ -5,12 +5,14 @@ package com.thomsonreuters.Takoyaki;
 
 import com.reuters.rfa.common.Handle;
 import com.google.gson.Gson;
+import org.joda.time.Interval; 
 
 public class Analytic {
 	private String service;
 	private String app;
 	private String query;
 	private String item;
+	private Interval interval;
 
 	public Analytic (String service, String app, String query, String item) {
 		this.setService (service);
@@ -49,6 +51,14 @@ public class Analytic {
 
 	public void setItem (String item) {
 		this.item = item;
+	}
+
+	public Interval getInterval() {
+		return this.interval;
+	}
+
+	public void setInterval (Interval interval) {
+		this.interval = interval;
 	}
 
 	@Override

@@ -677,7 +677,27 @@ public final class GenericOMMParser
                             dumpFieldEntryHeader(fe, fiddef, ps, tabLevel);
                             OMMData data = null;
                             if (fe.getDataType() == OMMTypes.UNKNOWN)
+			    {
+if (fiddef.getOMMType() == OMMTypes.TIME) {
+  if (entry.getData().getEncodedLength() != 8)
+    data = fe.getData(fiddef.getOMMType());
+  else {
+    OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
+    byte[] encoded_time = encoded_data.getBytes();
+    long word = (encoded_time[5] * 256 * 256) + (encoded_time[6] * 256) + encoded_time[7];
+    long hours  = encoded_time[0];
+    long mins   = encoded_time[1];
+    long secs   = encoded_time[2];
+    long millis = (encoded_time[3] * 256) + encoded_time[4];
+    long micros = (word / 2048);
+    long nanos  = (word % 2048);
+    ps.printf("%02d:%02d:%02d.%03d%03d%03d\n",
+		hours, mins, secs, millis, micros, nanos);
+    break;
+  }
+} else
                                 data = fe.getData(fiddef.getOMMType());
+			    }
                             else
                                 // defined data already has type
                                 data = fe.getData();

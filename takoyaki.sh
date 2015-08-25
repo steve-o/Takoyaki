@@ -1,7 +1,7 @@
 #!/bin/sh
 
 JAVA=/usr/java/jdk1.8.0/bin/java
-JAVA=java
+#JAVA=java
 
 # Hard fail support
 ENABLEASSERTIONS=-enableassertions
@@ -34,6 +34,7 @@ ENABLEDISRUPTOR=-DLog4jContextSelector=org.apache.logging.log4j.core.async.Async
 
 # Thomson Reuters RFA and ValueAdd libraries
 RFA=rfa.jar
+RFA=rfa.java8.jar
 RFAVALUEADD=ValueAdd_DomainRep.jar
 
 # ZeroMQ

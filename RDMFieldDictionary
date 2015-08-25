@@ -19329,10 +19329,22 @@ RFQ_SIZE   "RFQ SIZE"            7037  NULL        INTEGER            15  INT64 
 !
 ! Request for quote quantity
 !
-PRE_INT159 "PRED INTEGER 159"    7038  NULL        INTEGER            15  INT64            6
-PRE_INT160 "PRED INTEGER 160"    7039  NULL        INTEGER            15  INT64            6
-PRE_INT161 "PRED INTEGER 161"    7040  NULL        INTEGER            15  INT64            6
-PRE_INT162 "PRED INTEGER 162"    7041  NULL        INTEGER            15  INT64            6
+THEO_LTVOL "THEO LST TRD VOL"    7038  NULL        INTEGER            15  INT64            6
+!
+! Theoretical last trade volume associated with the last updated trade price
+!
+ITVL_COUNT "INTERVAL COUNT"      7039  NULL        INTEGER            15  INT64            6
+!
+! Interval summary count
+!
+MAX_POINTS "MAX POINTS"          7040  NULL        INTEGER            15  INT64            6
+!
+! Maximum number of points to return
+!
+OFSET_DAYS "OFFSET DAYS"         7041  NULL        INTEGER            15  INT64            6
+!
+! Offset Days
+!
 PRE_INT163 "PRED INTEGER 163"    7042  NULL        INTEGER            15  INT64            6
 PRE_INT164 "PRED INTEGER 164"    7043  NULL        INTEGER            15  INT64            6
 PRE_INT165 "PRED INTEGER 165"    7044  NULL        INTEGER            15  INT64            6
@@ -25059,11 +25071,26 @@ MET_DATE   "MET VAL DATE"        9214  NULL        DATE               11  DATE  
 !
 ! The date of when the Metric Value(s) was calculated
 !
-PRE_DT104  "PRED DATE 104"       9215  NULL        DATE               11  DATE             4
-PRE_DT105  "PRED DATE 105"       9216  NULL        DATE               11  DATE             4
-PRE_DT106  "PRED DATE 106"       9217  NULL        DATE               11  DATE             4
-PRE_DT107  "PRED DATE 107"       9218  NULL        DATE               11  DATE             4
-PRE_DT108  "PRED DATE 108"       9219  NULL        DATE               11  DATE             4
+GRK_VAL_DT "GREEKS VAL UPT DT"   9215  NULL        DATE               11  DATE             4
+!
+! Greeks Value update date
+!
+HALT_E_DT  "HALT END DATE"       9216  NULL        DATE               11  DATE             4
+!
+! Security halt condition end date
+!
+ITVL_DATE  "INTERVAL DT"         9217  NULL        DATE               11  DATE             4
+!
+! Interval summary date
+!
+RQT_E_DATE "REQUEST END DT"      9218  NULL        DATE               11  DATE             4
+!
+! Request end date
+!
+RQT_S_DATE "REQUEST START DT"    9219  NULL        DATE               11  DATE             4
+!
+! Request start date 
+!
 PRE_DT109  "PRED DATE 109"       9220  NULL        DATE               11  DATE             4
 PRE_DT110  "PRED DATE 110"       9221  NULL        DATE               11  DATE             4
 PRE_DT111  "PRED DATE 111"       9222  NULL        DATE               11  DATE             4
@@ -27986,9 +28013,18 @@ PRE_32T012 "PRED 32 TXT 012"    12063  NULL        ALPHANUMERIC       32  RMTES_
 PRE_32T013 "PRED 32 TXT 013"    12064  NULL        ALPHANUMERIC       32  RMTES_STRING    32
 PRE_32T014 "PRED 32 TXT 014"    12065  NULL        ALPHANUMERIC       32  RMTES_STRING    32
 PRE_32T015 "PRED 32 TXT 015"    12066  NULL        ALPHANUMERIC       32  RMTES_STRING    32
-PRE_32T016 "PRED 32 TXT 016"    12067  NULL        ALPHANUMERIC       32  RMTES_STRING    32
-PRE_32T017 "PRED 32 TXT 017"    12068  NULL        ALPHANUMERIC       32  RMTES_STRING    32
-PRE_32T018 "PRED 32 TXT 018"    12069  NULL        ALPHANUMERIC       32  RMTES_STRING    32
+REFRIC_ISS "REF AST RIC AT ISS" 12067  NULL        ALPHANUMERIC       32  RMTES_STRING    32
+!
+! Reference asset or benchmark RIC for a security at issue
+!
+REFAST_RIC "REF ASSET RIC"      12068  NULL        ALPHANUMERIC       32  RMTES_STRING    32
+!
+! Reference asset or benchmark RIC for a security
+!
+UUID       "UUID"               12069  NULL        ALPHANUMERIC       32  RMTES_STRING    32
+!
+! Field carrying a user or machines unique unchanging identifier
+!
 PRE_32T019 "PRED 32 TXT 019"    12070  NULL        ALPHANUMERIC       32  RMTES_STRING    32
 PRE_32T020 "PRED 32 TXT 020"    12071  NULL        ALPHANUMERIC       32  RMTES_STRING    32
 PRE_32T021 "PRED 32 TXT 021"    12072  NULL        ALPHANUMERIC       32  RMTES_STRING    32
@@ -29050,7 +29086,10 @@ PRE_1ET181 "PRED 1 ET 181"      12882  NULL        ENUMERATED    3 ( 8 )  ENUM  
 PRE_1ET182 "PRED 1 ET 182"      12883  NULL        ENUMERATED    3 ( 8 )  ENUM             1
 PRE_1ET183 "PRED 1 ET 183"      12884  NULL        ENUMERATED    3 ( 8 )  ENUM             1
 PRE_1ET184 "PRED 1 ET 184"      12885  NULL        ENUMERATED    3 ( 8 )  ENUM             1
-PRE_1ET185 "PRED 1 ET 185"      12886  NULL        ENUMERATED    3 ( 8 )  ENUM             1
+CORAX_ADJ  "CORAX ADJ IND"      12886  NULL        ENUMERATED    3 ( 5 )  ENUM             1
+!
+! CORAX Adjusted / not adjusted data
+!
 PRE_1ET186 "PRED 1 ET 186"      12887  NULL        ENUMERATED    3 ( 8 )  ENUM             1
 PRE_1ET187 "PRED 1 ET 187"      12888  NULL        ENUMERATED    3 ( 8 )  ENUM             1
 PRE_1ET188 "PRED 1 ET 188"      12889  NULL        ENUMERATED    3 ( 8 )  ENUM             1
@@ -30696,11 +30735,26 @@ DYN_VRE_MS "DYN VAR RG ETM MS"  14220  NULL        INTEGER            15  TIME  
 !
 ! Dynamic price variation range end time 
 !
-PRE_089_MS "PRED TIME MS2 089"  14221  NULL        INTEGER            15  TIME             5
-PRE_090_MS "PRED TIME MS2 090"  14222  NULL        INTEGER            15  TIME             5
-PRE_091_MS "PRED TIME MS2 091"  14223  NULL        INTEGER            15  TIME             5
-PRE_092_MS "PRED TIME MS2 092"  14224  NULL        INTEGER            15  TIME             5
-PRE_093_MS "PRED TIME MS2 093"  14225  NULL        INTEGER            15  TIME             5
+LMTBTM_MS  "PRC LMT BREACH MS"  14221  NULL        INTEGER            15  TIME             5
+!
+! The time upper/lower price limit is breached.  
+!
+LMTPTM_MS  "PRC LMT PLANEND MS" 14222  NULL        INTEGER            15  TIME             5
+!
+! The time upper/lower price limit is planned to be ended.  
+!
+ITVL_TM_MS "INTERVAL TM MS"     14223  NULL        INTEGER            15  TIME             5
+!
+! Interval summary time
+!
+RQT_ETM_MS "REQUEST ETM MS"     14224  NULL        INTEGER            15  TIME             5
+!
+! Request end time with milliseconds precision 
+!
+RQT_STM_MS "REQUEST STM MS"     14225  NULL        INTEGER            15  TIME             5
+!
+! Request  start time with milliseconds precision
+!
 PRE_094_MS "PRED TIME MS2 094"  14226  NULL        INTEGER            15  TIME             5
 PRE_095_MS "PRED TIME MS2 095"  14227  NULL        INTEGER            15  TIME             5
 PRE_096_MS "PRED TIME MS2 096"  14228  NULL        INTEGER            15  TIME             5
@@ -30899,6 +30953,10 @@ TESENDMS   "TE SEND TIME"       30089  NULL        INTEGER            15  UINT64
 URNFIELD   "URN_FIELD"          30090  NULL        ALPHANUMERIC      512  RMTES_STRING   512
 !
 ! Eikon News metadata FIDs
+!
+QUERY      "REQUEST QUERY"      32650  NULL        ALPHANUMERIC     5100  RMTES_STRING  5100
+!
+! Query sent in data request
 !
 POLL_CATG  "POLLING CATEGORY"   32651  NULL        ALPHANUMERIC       12  RMTES_STRING    12
 !

@@ -14,6 +14,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -39,6 +40,7 @@ import com.reuters.rfa.omm.OMMArray;
 import com.reuters.rfa.omm.OMMAttribInfo;
 import com.reuters.rfa.omm.OMMData;
 import com.reuters.rfa.omm.OMMDataBuffer;
+import com.reuters.rfa.omm.OMMDateTime;
 import com.reuters.rfa.omm.OMMElementEntry;
 import com.reuters.rfa.omm.OMMElementList;
 import com.reuters.rfa.omm.OMMEncoder;
@@ -47,13 +49,17 @@ import com.reuters.rfa.omm.OMMFieldEntry;
 import com.reuters.rfa.omm.OMMFieldList;
 import com.reuters.rfa.omm.OMMFilterEntry;
 import com.reuters.rfa.omm.OMMFilterList;
+import com.reuters.rfa.omm.OMMIterable;
 import com.reuters.rfa.omm.OMMMap;
 import com.reuters.rfa.omm.OMMMapEntry;
 import com.reuters.rfa.omm.OMMMsg;
 import com.reuters.rfa.omm.OMMNumeric;
 import com.reuters.rfa.omm.OMMPool;
+import com.reuters.rfa.omm.OMMSeries;
 import com.reuters.rfa.omm.OMMState;
 import com.reuters.rfa.omm.OMMTypes;
+import com.reuters.rfa.omm.OMMQos;
+import com.reuters.rfa.omm.OMMQosReq;
 import com.reuters.rfa.rdm.RDMInstrument;
 import com.reuters.rfa.rdm.RDMMsgTypes;
 import com.reuters.rfa.rdm.RDMService;
@@ -168,6 +174,7 @@ public class AnalyticConsumer implements Client {
 		private String service_name;
 		private String app_name;
 		private String uuid;
+		private String password;
 		private List<AnalyticStream> streams;
 		private LinkedHashMap<Integer, AnalyticStream> stream_map;
 		private int stream_id;
@@ -175,7 +182,7 @@ public class AnalyticConsumer implements Client {
 		private ResponseStatus closed_response_status;
 		private Handle private_stream;
 
-		public App (EventQueue event_queue, OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, Handle login_handle, String service_name, String app_name, String uuid) {
+		public App (EventQueue event_queue, OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, Handle login_handle, String service_name, String app_name, String uuid, String password) {
 			this.event_queue = event_queue;
 			this.omm_consumer = omm_consumer;
 			this.omm_pool = omm_pool;
@@ -185,6 +192,7 @@ public class AnalyticConsumer implements Client {
 			this.service_name = service_name;
 			this.app_name = app_name;
 			this.uuid = uuid;
+			this.password = password;
 			this.streams = Lists.newLinkedList();
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
@@ -199,6 +207,7 @@ public class AnalyticConsumer implements Client {
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
+msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
 			msg.setAssociatedMetaInfo (this.login_handle);
 			msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
 			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
@@ -211,8 +220,12 @@ public class AnalyticConsumer implements Client {
 			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
 			this.omm_encoder.encodeMsgInit (msg, OMMTypes.ELEMENT_LIST, OMMTypes.NO_DATA);
 			this.omm_encoder.encodeElementListInit (OMMElementList.HAS_STANDARD_DATA, (short)0, (short)0);
+// username
 			this.omm_encoder.encodeElementEntryInit ("Name", OMMTypes.ASCII_STRING);
 			this.omm_encoder.encodeString (this.uuid, OMMTypes.ASCII_STRING);
+// password
+			this.omm_encoder.encodeElementEntryInit ("Password", OMMTypes.ASCII_STRING);
+			this.omm_encoder.encodeString (this.password, OMMTypes.ASCII_STRING);
 			this.omm_encoder.encodeAggregateComplete();
 			ommItemIntSpec.setMsg ((OMMMsg)this.omm_encoder.getEncodedObject());
 			if (LOG.isDebugEnabled()) {
@@ -286,34 +299,90 @@ public class AnalyticConsumer implements Client {
 			LOG.trace ("Sending analytic query request.");
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setStreamId (stream.getStreamId());
-			msg.setMsgType (OMMMsg.MsgType.REQUEST);
-			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
 			msg.setAssociatedMetaInfo (this.private_stream);
-// TBD: SignalsApp does not support snapshot requests.
-			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
-			attribInfo.setNameType ((short)0x1 /* RIC */);
-			attribInfo.setId (0x1 /* TechAnalysis */);
-			if (!stream.getQuery().startsWith ("#type=")) {
-				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
+			msg.setMsgType (OMMMsg.MsgType.REQUEST);
+
+			if (stream.getAppName().equals ("History"))
+			{
+//				msg.setQosReq (OMMQosReq.QOSR_REALTIME_TICK_BY_TICK);
+				msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
+				OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
+				attribInfo.setNameType ((short)0x1 /* RIC */);
+//				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.ATTRIB_INFO_IN_UPDATES);
+				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING);
+//				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
 				attribInfo.setName (stream.getItemName());
-			} else {
-				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
-				sb.setLength (0);
-				sb.append ("/").append (stream.getItemName());
-				attribInfo.setName (sb.toString());
-			}
-			msg.setAttribInfo (attribInfo);
-			this.omm_pool.releaseAttribInfo (attribInfo);
+				msg.setAttribInfo (attribInfo);
+				this.omm_pool.releaseAttribInfo (attribInfo);
 
 /* OMMAttribInfo.Attrib as an OMMElementList */
-			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-			this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
-			this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
-			this.omm_encoder.encodeFieldEntryInit ((short)32650, OMMTypes.RMTES_STRING);
-			this.omm_encoder.encodeString (stream.getQuery(), OMMTypes.RMTES_STRING);
-			this.omm_encoder.encodeFieldEntryInit ((short)12069, OMMTypes.RMTES_STRING);
-			this.omm_encoder.encodeString (this.uuid, OMMTypes.RMTES_STRING);
-			this.omm_encoder.encodeAggregateComplete();
+				this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
+				this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
+				this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
+// MET_TF_U: 9=TAS, 10=TAQ
+				this.omm_encoder.encodeFieldEntryInit ((short)12794, OMMTypes.ENUM);
+				if (stream.getQuery().equals ("tas")) {
+					this.omm_encoder.encodeEnum (9);
+				} else if (stream.getQuery().equals ("taq")) {
+					this.omm_encoder.encodeEnum (10);
+				}
+// RQT_S_DATE+RQT_STM_MS
+				this.omm_encoder.encodeFieldEntryInit ((short)9219, OMMTypes.DATE);
+				this.omm_encoder.encodeDate (stream.getInterval().getStart().getYear(),
+								stream.getInterval().getStart().getMonthOfYear(),
+								stream.getInterval().getStart().getDayOfMonth());
+				this.omm_encoder.encodeFieldEntryInit ((short)14225, OMMTypes.TIME);
+				this.omm_encoder.encodeTime (stream.getInterval().getStart().getHourOfDay(),
+								stream.getInterval().getStart().getMinuteOfHour(),
+								stream.getInterval().getStart().getSecondOfMinute(),
+								stream.getInterval().getStart().getMillisOfSecond());
+// RQT_E_DATE+RQT_ETM_MS
+				this.omm_encoder.encodeFieldEntryInit ((short)9218, OMMTypes.DATE);
+				this.omm_encoder.encodeDate (stream.getInterval().getEnd().getYear(),
+								stream.getInterval().getEnd().getMonthOfYear(),
+								stream.getInterval().getEnd().getDayOfMonth());
+				this.omm_encoder.encodeFieldEntryInit ((short)14224, OMMTypes.TIME);
+				this.omm_encoder.encodeTime (stream.getInterval().getEnd().getHourOfDay(),
+								stream.getInterval().getEnd().getMinuteOfHour(),
+								stream.getInterval().getEnd().getSecondOfMinute(),
+								stream.getInterval().getEnd().getMillisOfSecond());
+// optional: CORAX_ADJ
+				this.omm_encoder.encodeFieldEntryInit ((short)12886, OMMTypes.ENUM);
+				this.omm_encoder.encodeEnum (1);
+// optional: MAX_POINTS
+				this.omm_encoder.encodeFieldEntryInit ((short)7040, OMMTypes.INT);
+				this.omm_encoder.encodeInt (10);
+				this.omm_encoder.encodeAggregateComplete();
+			}
+			else
+			{
+				msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
+// TBD: SignalsApp does not support snapshot requests.
+				OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
+				attribInfo.setNameType ((short)0x1 /* RIC */);
+				attribInfo.setId (0x1 /* TechAnalysis */);
+				if (!stream.getQuery().startsWith ("#type=")) {
+					msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
+					attribInfo.setName (stream.getItemName());
+				} else {
+					msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
+					sb.setLength (0);
+					sb.append ("/").append (stream.getItemName());
+					attribInfo.setName (sb.toString());
+				}
+				msg.setAttribInfo (attribInfo);
+				this.omm_pool.releaseAttribInfo (attribInfo);
+
+/* OMMAttribInfo.Attrib as an OMMElementList */
+				this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
+				this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
+				this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
+				this.omm_encoder.encodeFieldEntryInit ((short)32650, OMMTypes.RMTES_STRING);
+				this.omm_encoder.encodeString (stream.getQuery(), OMMTypes.RMTES_STRING);
+				this.omm_encoder.encodeFieldEntryInit ((short)12069, OMMTypes.RMTES_STRING);
+				this.omm_encoder.encodeString (this.uuid, OMMTypes.RMTES_STRING);
+				this.omm_encoder.encodeAggregateComplete();
+			}
 
 			stream.setCommandId (this.sendGenericMsg ((OMMMsg)this.omm_encoder.getEncodedObject(), this.private_stream, stream));
 			this.omm_pool.releaseMsg (msg);
@@ -349,6 +418,7 @@ public class AnalyticConsumer implements Client {
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setMsgType (OMMMsg.MsgType.GENERIC);
 			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
+msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
 			msg.setAssociatedMetaInfo (stream_handle);
 			msg.setIndicationFlags (OMMMsg.Indication.GENERIC_COMPLETE);
 
@@ -445,6 +515,8 @@ public class AnalyticConsumer implements Client {
 		private void OnRespMsg (OMMMsg msg, Handle handle, Object closure) {
 			LOG.trace ("OnRespMsg: {}", msg);
 			switch (msg.getMsgModelType()) {
+case 12 /* RDMMsgTypes.HISTORY */:
+case 30 /* RDMMsgTypes.ANALYTICS */:
 			case 127 /* RDMMsgTypes.SYSTEM */:
 				this.OnAppResponse (msg, handle, closure);
 				break;
@@ -465,6 +537,8 @@ public class AnalyticConsumer implements Client {
 			}
 /* Forward all MMT_ANALYTICS encapsulated messages */
 			switch (msg.getMsgModelType()) {
+case 12 /* RDMMsgTypes.HISTORY */:
+case 30 /* RDMMsgTypes.ANALYTICS */:
 			case 127 /* RDMMsgTypes.SYSTEM */:
 				if (msg.getDataType() == OMMTypes.MSG) {
 					this.OnAnalyticsMsg ((OMMMsg)msg.getPayload(), handle, closure);
@@ -497,6 +571,7 @@ public class AnalyticConsumer implements Client {
 		private void OnAnalyticsRespMsg (OMMMsg msg, Handle handle, Object closure) {
 			LOG.trace ("OnAnalyticsRespMsg: {}", msg);
 			switch (msg.getMsgModelType()) {
+			case 12 /* RDMMsgTypes.HISTORY */:
 			case 30 /* RDMMsgTypes.ANALYTICS */:
 				this.OnAnalyticsResponse (msg, handle, closure);
 				break;
@@ -529,6 +604,182 @@ public class AnalyticConsumer implements Client {
 				this.code = code;
 				this.text = text;
 			}
+		}
+
+/* Elektron Time Series refresh */
+		private boolean OnHistoryResponse (OMMMsg msg, AnalyticStream stream) {
+			LOG.trace ("OnHistoryResponse: {}", msg);
+			if (OMMTypes.SERIES != msg.getDataType()) {
+				LOG.trace ("Unsupported data type ({}) in OMM response.", msg.getDataType());
+				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
+				this.destroyItemStream (stream);
+				return false;
+			}
+
+	                final OMMSeries series = (OMMSeries)msg.getPayload();
+
+			sb.setLength (0);
+			sb.append ('{')
+			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
+			  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+			  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
+			if (stream.getQuery().equals ("tas")) {
+				sb.append (", \"fields\": [\"datetime\", \"TRDPRC_1\", \"TRDVOL_1\", \"BID\", \"BIDSIZE\", \"ASK\", \"ASKSIZE\"]");
+			} else {
+				sb.append (", \"fields\": [\"datetime\", \"BID\", \"BIDSIZE\", \"ASK\", \"ASKSIZE\"]");
+			}
+// flatten to dataframe.
+// SERIES 
+//   SERIES_ENTRY
+//     FIELD_LIST
+//       FIELD_ENTRY
+			List<String> datetime_list = Lists.newLinkedList(),
+					price_list = Lists.newLinkedList(),
+					volume_list = Lists.newLinkedList(),
+					bid_list = Lists.newLinkedList(),
+					bidsize_list = Lists.newLinkedList(),
+					ask_list = Lists.newLinkedList(),
+					asksize_list = Lists.newLinkedList();
+			for (Iterator it = ((OMMIterable)series).iterator(); it.hasNext();)
+			{
+				final OMMEntry series_entry = (OMMEntry)it.next();
+				if (OMMTypes.SERIES_ENTRY != series_entry.getType()) {
+					LOG.trace ("Unsupported data type ({}) in OMM series.", series_entry.getType());
+					continue;
+				}
+				final OMMData field_list = series_entry.getData();
+				if (OMMTypes.FIELD_LIST != field_list.getType()) {
+					LOG.trace ("Unsupported data type ({}) in OMM series entry.", field_list.getType());
+					continue;
+				}
+				OMMDateTime itvl_date = null;
+				for (Iterator jt = ((OMMIterable)field_list).iterator(); jt.hasNext();)
+				{
+					final OMMEntry entry = (OMMEntry)jt.next();
+					if (OMMTypes.FIELD_ENTRY != entry.getType()) {
+						LOG.trace ("Unsupported data type ({}) in OMM field entry.", entry.getType());
+						continue;
+					}
+					final OMMFieldEntry fe = (OMMFieldEntry)entry;
+					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
+					switch (fe.getFieldId()) {
+					case 9217: // ITVL_DATE
+						itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
+						break;
+					case 14223: // ITVL_TM_MS
+						if (entry.getData().getEncodedLength() < 5) {
+							final OMMDateTime itvl_tm = (OMMDateTime)fe.getData (fiddef.getOMMType());
+							final DateTime datetime = new DateTime (itvl_date.getYear(),
+											itvl_date.getMonth(),
+											itvl_date.getDate(),
+											itvl_tm.getHour(),
+											itvl_tm.getMinute(),
+											itvl_tm.getSecond(),
+											DateTimeZone.UTC);
+							datetime_list.add ('"' + datetime.toString() + '"');
+						} else if (entry.getData().getEncodedLength() == 5) {
+							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
+							byte[] encoded_time = encoded_data.getBytes();
+							int hours  = encoded_time[0];
+							int mins   = encoded_time[1];
+							int secs   = encoded_time[2];
+							int millis = (encoded_time[3] * 256) + encoded_time[4];
+							final DateTime datetime = new DateTime (itvl_date.getYear(),
+											itvl_date.getMonth(),
+											itvl_date.getDate(),
+											hours,
+											mins,
+											secs,
+											millis,
+											DateTimeZone.UTC);
+							datetime_list.add ('"' + datetime.toString() + '"');
+						} else {
+							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
+							byte[] encoded_time = encoded_data.getBytes();
+							long word = (encoded_time[5] * 256 * 256) + (encoded_time[6] * 256) + encoded_time[7];
+							int hours  = encoded_time[0];
+							int mins   = encoded_time[1];
+							int secs   = encoded_time[2];
+							int millis = (encoded_time[3] * 256) + encoded_time[4];
+							int micros = (int)(word / 2048);
+							int nanos  = (int)(word % 2048);
+							final DateTime datetime = new DateTime (itvl_date.getYear(),
+											itvl_date.getMonth(),
+											itvl_date.getDate(),
+											hours,
+											mins,
+											secs,
+											millis,
+											DateTimeZone.UTC);
+							datetime_list.add ('"' + datetime.toString() + '"');
+						}
+						break;
+					case 6: // TRDPRC_1
+						final OMMNumeric price = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						price_list.add (price.toString());
+						break;
+					case 22: // BID
+						final OMMNumeric bid = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						bid_list.add (bid.toString());
+						break;
+					case 30: // BIDSIZE
+						final OMMNumeric bidsize = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						bidsize_list.add (bidsize.toString());
+						break;
+					case 25: // ASK
+						final OMMNumeric ask = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						ask_list.add (ask.toString());
+						break;
+					case 31: // ASKSIZE
+						final OMMNumeric asksize = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						asksize_list.add (asksize.toString());
+						break;
+					case 178: // TRDVOL_1
+						final OMMNumeric volume = (OMMNumeric)fe.getData (fiddef.getOMMType());
+						volume_list.add (volume.toString());
+						break;
+					default:
+						break;
+					}
+				}
+			}
+			sb.append (", \"timeseries\": [");
+			if (stream.getQuery().equals ("tas")) {
+				sb.append ("[");
+				Joiner.on (",").appendTo (sb, datetime_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, price_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, volume_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, bid_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, bidsize_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, ask_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, asksize_list.iterator());
+				sb.append ("]");
+			} else {
+				sb.append ("[");
+				Joiner.on (",").appendTo (sb, datetime_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, bid_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, bidsize_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, ask_list.iterator());
+				sb.append ("],[");
+				Joiner.on (",").appendTo (sb, asksize_list.iterator());
+				sb.append ("]");
+			}
+			sb.append ("]")
+			  .append ("}");
+
+			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+			this.destroyItemStream (stream);
+			return true;
 		}
 
 		private void OnAnalyticsStatus (ResponseStatus response_status, AnalyticStream stream, int response_code) {
@@ -648,6 +899,12 @@ public class AnalyticConsumer implements Client {
 			}
 			if (OMMMsg.MsgType.REFRESH_RESP == msg.getMsgType()) {
 /* fall through */
+/* Hook for History responses */
+				if (stream.getAppName().equals ("History")
+					&& this.OnHistoryResponse (msg, stream))
+				{
+					return;
+				}
 			}
 			else if (OMMMsg.MsgType.UPDATE_RESP == msg.getMsgType()) {
 				LOG.trace ("Ignoring update.");
@@ -1148,6 +1405,7 @@ public class AnalyticConsumer implements Client {
 		stream.setItemName (analytic.getItem());
 		stream.setAppName (analytic.getApp());
 		stream.setServiceName (analytic.getService());
+		stream.setInterval (analytic.getInterval());
 /* lazy app private stream creation */
 		App app = this.apps.get (analytic.getApp());
 		if (null == app) {
@@ -1158,7 +1416,8 @@ public class AnalyticConsumer implements Client {
 					this.login_handle,
 					analytic.getService(),
 					analytic.getApp(),
-					this.config.hasUuid() ? this.config.getUuid() : "");
+					this.config.hasUuid() ? this.config.getUuid() : "",
+					this.config.hasPassword() ? this.config.getPassword() : "");
 			this.apps.put (analytic.getApp(), app);
 			app.sendConnectionRequest();
 		}

@@ -10,6 +10,7 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.reuters.rfa.common.Handle;
+import org.joda.time.Interval;
 
 public class AnalyticStream {
 	private String query;
@@ -19,6 +20,9 @@ public class AnalyticStream {
 
 /* App name, e.g. SignalApp */
 	private String app_name;
+
+/* Source time interval */
+	private Interval interval;
 
 /* Service origin, e.g. ECP_SAP */
 	private String service_name;
@@ -68,6 +72,14 @@ public class AnalyticStream {
 
 	public void setAppName (String app_name) {
 		this.app_name = app_name;
+	}
+
+	public Interval getInterval() {
+		return this.interval;
+	}
+
+	public void setInterval (Interval interval) {
+		this.interval = interval;
 	}
 
 	public String getServiceName() {
@@ -160,6 +172,7 @@ public class AnalyticStream {
 			  "\"query\":\"" + this.query + "\"" +
 			", \"item_name\":\"" + this.item_name + "\"" +
 			", \"app_name\":\"" + this.app_name + "\"" +
+			", \"interval\":\"" + this.interval + "\"" +
 			", \"service_name\":\"" + this.service_name + "\"" +
 			", \"stream_id\":" + this.stream_id +
 			", \"command_id\":" + this.command_id +
