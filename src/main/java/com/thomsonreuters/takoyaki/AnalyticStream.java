@@ -185,10 +185,10 @@ public class AnalyticStream {
 			if (map.containsKey (row)) {
 				list.add (map.get (row));
 			} else {
-/* prefer null but R tends to fail, so use empty string.
+/* prefer null but R needs tlc to process the result.
  * ref: http://stackoverflow.com/questions/15793759/convert-r-list-to-dataframe-with-missing-null-elements
  */
-				list.add ("\"\"");
+				list.add ("null");
 			}
 		}
 		return list;
