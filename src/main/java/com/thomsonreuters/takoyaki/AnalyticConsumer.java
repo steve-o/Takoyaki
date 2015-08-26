@@ -44,6 +44,7 @@ import com.reuters.rfa.omm.OMMDateTime;
 import com.reuters.rfa.omm.OMMElementEntry;
 import com.reuters.rfa.omm.OMMElementList;
 import com.reuters.rfa.omm.OMMEncoder;
+import com.reuters.rfa.omm.OMMEnum;
 import com.reuters.rfa.omm.OMMEntry;
 import com.reuters.rfa.omm.OMMFieldEntry;
 import com.reuters.rfa.omm.OMMFieldList;
@@ -351,7 +352,7 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
 				this.omm_encoder.encodeEnum (1);
 // optional: MAX_POINTS
 				this.omm_encoder.encodeFieldEntryInit ((short)7040, OMMTypes.INT);
-				this.omm_encoder.encodeInt (10);
+				this.omm_encoder.encodeInt (100);
 				this.omm_encoder.encodeAggregateComplete();
 			}
 			else
@@ -618,29 +619,48 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 
 	                final OMMSeries series = (OMMSeries)msg.getPayload();
 
-			sb.setLength (0);
-			sb.append ('{')
-			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
-			  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
-			  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
-			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
-			if (stream.getQuery().equals ("tas")) {
-				sb.append (", \"fields\": [\"datetime\", \"TRDPRC_1\", \"TRDVOL_1\", \"BID\", \"BIDSIZE\", \"ASK\", \"ASKSIZE\"]");
-			} else {
-				sb.append (", \"fields\": [\"datetime\", \"BID\", \"BIDSIZE\", \"ASK\", \"ASKSIZE\"]");
+			if (msg.isFinal()) {
+				sb.setLength (0);
+				sb.append ('{')
+				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
+				  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
+				  .append (", \"fields\": [\"datetime\"");
+				final Set<String> fids = stream.getResultFids();
+				for (Iterator it = fids.iterator(); it.hasNext();) {
+					final String fid = (String)it.next();
+					if (fid.equals ("datetime"))
+						continue;
+					sb.append (",")
+					  .append ("\"")
+					  .append (fid)
+					  .append ("\"");
+				}
+				sb.append ("]")
+				  .append (", \"timeseries\": [[");
+				Joiner.on (",").appendTo (sb, stream.getResultForFid ("datetime"));
+				sb.append ("]");
+				for (Iterator it = fids.iterator(); it.hasNext();) {
+					final String fid = (String)it.next();
+LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
+					if (fid.equals ("datetime"))
+						continue;
+					sb.append (",")
+					  .append ("[");
+					Joiner.on (",").appendTo (sb, stream.getResultForFid (fid));
+					sb.append ("]");
+				}
+				sb.append ("]")
+				  .append ("}");
+				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+				this.destroyItemStream (stream);
 			}
 // flatten to dataframe.
 // SERIES 
 //   SERIES_ENTRY
 //     FIELD_LIST
 //       FIELD_ENTRY
-			List<String> datetime_list = Lists.newLinkedList(),
-					price_list = Lists.newLinkedList(),
-					volume_list = Lists.newLinkedList(),
-					bid_list = Lists.newLinkedList(),
-					bidsize_list = Lists.newLinkedList(),
-					ask_list = Lists.newLinkedList(),
-					asksize_list = Lists.newLinkedList();
 			for (Iterator it = ((OMMIterable)series).iterator(); it.hasNext();)
 			{
 				final OMMEntry series_entry = (OMMEntry)it.next();
@@ -664,6 +684,8 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 					final OMMFieldEntry fe = (OMMFieldEntry)entry;
 					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
 					switch (fe.getFieldId()) {
+					case 374: // IRGCOND
+						break;
 					case 9217: // ITVL_DATE
 						itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
 						break;
@@ -677,14 +699,17 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 											itvl_tm.getMinute(),
 											itvl_tm.getSecond(),
 											DateTimeZone.UTC);
-							datetime_list.add ('"' + datetime.toString() + '"');
-						} else if (entry.getData().getEncodedLength() == 5) {
+							stream.addResult ("datetime", '"' + datetime.toString() + '"');
+						} else if (entry.getData().getEncodedLength() < 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
 							byte[] encoded_time = encoded_data.getBytes();
 							int hours  = encoded_time[0];
 							int mins   = encoded_time[1];
 							int secs   = encoded_time[2];
-							int millis = (encoded_time[3] * 256) + encoded_time[4];
+							int millis = ((encoded_time[3] * 256) + encoded_time[4]) & 0xffff;
+							if (millis > 999) {
+								millis = 0;
+							}
 							final DateTime datetime = new DateTime (itvl_date.getYear(),
 											itvl_date.getMonth(),
 											itvl_date.getDate(),
@@ -693,17 +718,26 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 											secs,
 											millis,
 											DateTimeZone.UTC);
-							datetime_list.add ('"' + datetime.toString() + '"');
-						} else {
+							stream.addResult ("datetime", '"' + datetime.toString() + '"');
+						} else if (entry.getData().getEncodedLength() == 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
 							byte[] encoded_time = encoded_data.getBytes();
 							long word = (encoded_time[5] * 256 * 256) + (encoded_time[6] * 256) + encoded_time[7];
 							int hours  = encoded_time[0];
 							int mins   = encoded_time[1];
 							int secs   = encoded_time[2];
-							int millis = (encoded_time[3] * 256) + encoded_time[4];
-							int micros = (int)(word / 2048);
-							int nanos  = (int)(word % 2048);
+							int millis = ((encoded_time[3] * 256) + encoded_time[4]) & 0xffff;
+							int micros = (int)(word / 2048) & 0x7ff;
+							int nanos  = (int)(word % 2048) & 0x7ff;
+							if (millis > 999) {
+								millis = 0;
+							}
+							if (micros > 999) {
+								micros = 0;
+							}
+							if (nanos > 999) {
+								nanos = 0;
+							}
 							final DateTime datetime = new DateTime (itvl_date.getYear(),
 											itvl_date.getMonth(),
 											itvl_date.getDate(),
@@ -712,73 +746,35 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 											secs,
 											millis,
 											DateTimeZone.UTC);
-							datetime_list.add ('"' + datetime.toString() + '"');
+							stream.addResult ("datetime", '"' + datetime.toString() + '"');
 						}
 						break;
-					case 6: // TRDPRC_1
-						final OMMNumeric price = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						price_list.add (price.toString());
-						break;
-					case 22: // BID
-						final OMMNumeric bid = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						bid_list.add (bid.toString());
-						break;
-					case 30: // BIDSIZE
-						final OMMNumeric bidsize = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						bidsize_list.add (bidsize.toString());
-						break;
-					case 25: // ASK
-						final OMMNumeric ask = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						ask_list.add (ask.toString());
-						break;
-					case 31: // ASKSIZE
-						final OMMNumeric asksize = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						asksize_list.add (asksize.toString());
-						break;
-					case 178: // TRDVOL_1
-						final OMMNumeric volume = (OMMNumeric)fe.getData (fiddef.getOMMType());
-						volume_list.add (volume.toString());
-						break;
 					default:
+						final OMMData data = (OMMData)fe.getData (fiddef.getOMMType());
+						switch (fiddef.getOMMType()) {
+						case OMMTypes.REAL:
+						case OMMTypes.UINT:
+							stream.addResult (fiddef.getName(), data.toString());
+							break;
+
+						case OMMTypes.ENUM:
+							stream.addResult (fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
+							break;
+
+						case OMMTypes.RMTES_STRING:
+						case OMMTypes.DATE:
+						case OMMTypes.TIME:
+							stream.addResult (fiddef.getName(), '"' + data.toString() + '"');
+							break;
+
+						default:
+							break;
+						}
 						break;
 					}
 				}
 			}
-			sb.append (", \"timeseries\": [");
-			if (stream.getQuery().equals ("tas")) {
-				sb.append ("[");
-				Joiner.on (",").appendTo (sb, datetime_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, price_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, volume_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, bid_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, bidsize_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, ask_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, asksize_list.iterator());
-				sb.append ("]");
-			} else {
-				sb.append ("[");
-				Joiner.on (",").appendTo (sb, datetime_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, bid_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, bidsize_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, ask_list.iterator());
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, asksize_list.iterator());
-				sb.append ("]");
-			}
-			sb.append ("]")
-			  .append ("}");
 
-			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
-			this.destroyItemStream (stream);
 			return true;
 		}
 
