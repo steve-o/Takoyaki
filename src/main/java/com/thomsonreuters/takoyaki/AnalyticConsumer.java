@@ -644,39 +644,6 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 			}
 */
 
-			if (msg.isFinal()) {
-				sb.setLength (0);
-				sb.append ('{')
-				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
-				  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
-				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
-				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
-				  .append (", \"fields\": [\"datetime\"");
-				final Set<String> fids = stream.getResultFids();
-				for (Iterator it = fids.iterator(); it.hasNext();) {
-					final String fid = (String)it.next();
-					sb.append (",")
-					  .append ("\"")
-					  .append (fid)
-					  .append ("\"");
-				}
-				sb.append ("]")
-				  .append (", \"timeseries\": [[");
-				Joiner.on (",").appendTo (sb, stream.getResultDateTimes());
-				sb.append ("]");
-				for (Iterator it = fids.iterator(); it.hasNext();) {
-					final String fid = (String)it.next();
-LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
-					sb.append (",")
-					  .append ("[");
-					Joiner.on (",").appendTo (sb, stream.getResultForFid (fid));
-					sb.append ("]");
-				}
-				sb.append ("]")
-				  .append ("}");
-				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
-				this.destroyItemStream (stream);
-			}
 // flatten to dataframe.
 // SERIES 
 //   SERIES_ENTRY
@@ -793,6 +760,40 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 						break;
 					}
 				}
+			}
+
+			if (msg.isFinal()) {
+				sb.setLength (0);
+				sb.append ('{')
+				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
+				  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
+				  .append (", \"fields\": [\"datetime\"");
+				final Set<String> fids = stream.getResultFids();
+				for (Iterator it = fids.iterator(); it.hasNext();) {
+					final String fid = (String)it.next();
+					sb.append (",")
+					  .append ("\"")
+					  .append (fid)
+					  .append ("\"");
+				}
+				sb.append ("]")
+				  .append (", \"timeseries\": [[");
+				Joiner.on (",").appendTo (sb, stream.getResultDateTimes());
+				sb.append ("]");
+				for (Iterator it = fids.iterator(); it.hasNext();) {
+					final String fid = (String)it.next();
+LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
+					sb.append (",")
+					  .append ("[");
+					Joiner.on (",").appendTo (sb, stream.getResultForFid (fid));
+					sb.append ("]");
+				}
+				sb.append ("]")
+				  .append ("}");
+				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+				this.destroyItemStream (stream);
 			}
 
 			return true;
