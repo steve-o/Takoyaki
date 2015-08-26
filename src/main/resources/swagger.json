@@ -13,6 +13,120 @@
 		"application/json"
 	],
 	"paths": {
+		"/{ticker}/taq": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Time and quotes",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/tas": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Time and sales",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/tas"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
 		"/{ticker}/taqfromdatetime": {
 			"get": {
 				"tags": [
@@ -79,7 +193,7 @@
 					"200": {
 						"description": "successful operation",
 						"schema": {
-							"$ref": "#/definitions/taq"
+							"$ref": "#/definitions/taqfromdatetime"
 						}
 					},
 					"404": {
@@ -218,7 +332,57 @@
 		}
 	},
 	"definitions": {
-		"taq": {
+		"history": {
+			"required": [
+				"recordname",
+				"start",
+				"end",
+				"query",
+				"fields",
+				"timeseries"
+			],
+			"properties": {
+				"recordname": {
+					"type": "string"
+				},
+				"start": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"end": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"query": {
+					"type": "string"
+				},
+				"fields": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"timeseries": {
+					"type": "array",
+					"items": [
+						{
+							"type": "array",
+							"items": {
+								"type": "string",
+								"format": "date-time"
+							}
+						},
+						{
+							"type": "array",
+							"items": {
+								"type": "*"
+							}
+						}
+					]
+				}
+			}
+		},
+		"taqfromdatetime": {
 			"required": [
 				"recordname",
 				"query",
