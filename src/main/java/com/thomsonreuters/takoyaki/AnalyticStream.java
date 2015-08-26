@@ -3,15 +3,14 @@
 
 package com.thomsonreuters.Takoyaki;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Table;
+import com.google.common.collect.TreeBasedTable;
 import com.google.gson.Gson;
 import com.reuters.rfa.common.Handle;
 import org.joda.time.Interval;
@@ -42,7 +41,7 @@ public class AnalyticStream {
 	private Handle timer_handle;
 	private int retry_count;
 
-	private Map<String, LinkedList<String>> fids;
+	private Table<String, String, String> fids;
 
 	private boolean is_closed;
 
@@ -165,19 +164,31 @@ public class AnalyticStream {
 		this.retry_count = 0;
 	}
 
-	public void addResult (String key, String value) {
-		if (!this.fids.containsKey (key)) {
-			this.fids.put (key, new LinkedList<String>());
-		}
-		this.fids.get (key).add (value);
+	public void addResult (String datetime, String fid, String value) {
+		this.fids.put (datetime, fid, value);
 	}
 
 	public Set<String> getResultFids() {
-		return this.fids.keySet();
+		return this.fids.columnKeySet();
 	}
 
-	public List<String> getResultForFid (String key) {
-		return this.fids.get (key);
+	public Set<String> getResultDateTimes() {
+		return this.fids.rowKeySet();
+	}
+
+	public List<String> getResultForFid (String fid) {
+		final Map<String, String> map = this.fids.column (fid);
+		final Set<String> set = this.fids.rowKeySet();
+		final List<String> list = new LinkedList<String>();
+		for (Iterator it = set.iterator(); it.hasNext();) {
+			final String row = (String)it.next();
+			if (map.containsKey (row)) {
+				list.add (map.get (row));
+			} else {
+				list.add ("null");
+			}
+		}
+		return list;
 	}
 
 	public boolean hasResult() {
@@ -185,7 +196,7 @@ public class AnalyticStream {
 	}
 
 	public void clearResult() {
-		this.fids = Maps.newTreeMap();
+		this.fids = TreeBasedTable.create();
 	}
 
 	public boolean isClosed() {

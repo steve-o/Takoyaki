@@ -619,6 +619,31 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 
 	                final OMMSeries series = (OMMSeries)msg.getPayload();
 
+/*
+			if (!stream.hasResult()) {
+				if (!series.has (OMMSeries.HAS_DATA_DEFINITIONS)) {
+					LOG.trace ("Unsupported aggregate header ({}) in OMM response.", msg.getDataType());
+					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
+					this.destroyItemStream (stream);
+					return false;
+				}
+				short dbtype = series.getDataType() == OMMTypes.FIELD_LIST ? OMMTypes.FIELD_LIST_DEF_DB : OMMTypes.ELEMENT_LIST_DEF_DB;
+				final OMMDataDefs datadefs = series.getDataDefs();
+				final DataDefDictionary listDefDb = DataDefDictionary.create (dbtype);
+				DataDefDictionary.decodeOMMDataDefs (listDefDb, datadefs);
+				for (Iterator listDefDbIter = listDefDb.iterator(); listDefDbIter.hasNext();)
+				{
+					DataDef listdef = (DataDef)listDefDbIter.next();
+					for (Iterator listdefIter = listdef.iterator(); listdefIter.hasNext();)
+					{
+						final FieldEntryDef ommEntry = (FieldEntryDef)listdefIter.next();
+						final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (ommEntry.getFieldId());
+						stream.putResultFid (fiddef.getName());
+					}
+				}
+			}
+*/
+
 			if (msg.isFinal()) {
 				sb.setLength (0);
 				sb.append ('{')
@@ -630,8 +655,6 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 				final Set<String> fids = stream.getResultFids();
 				for (Iterator it = fids.iterator(); it.hasNext();) {
 					final String fid = (String)it.next();
-					if (fid.equals ("datetime"))
-						continue;
 					sb.append (",")
 					  .append ("\"")
 					  .append (fid)
@@ -639,13 +662,11 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 				}
 				sb.append ("]")
 				  .append (", \"timeseries\": [[");
-				Joiner.on (",").appendTo (sb, stream.getResultForFid ("datetime"));
+				Joiner.on (",").appendTo (sb, stream.getResultDateTimes());
 				sb.append ("]");
 				for (Iterator it = fids.iterator(); it.hasNext();) {
 					final String fid = (String)it.next();
 LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
-					if (fid.equals ("datetime"))
-						continue;
 					sb.append (",")
 					  .append ("[");
 					Joiner.on (",").appendTo (sb, stream.getResultForFid (fid));
@@ -674,6 +695,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 					continue;
 				}
 				OMMDateTime itvl_date = null;
+				String row = null;
 				for (Iterator jt = ((OMMIterable)field_list).iterator(); jt.hasNext();)
 				{
 					final OMMEntry entry = (OMMEntry)jt.next();
@@ -684,8 +706,6 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 					final OMMFieldEntry fe = (OMMFieldEntry)entry;
 					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
 					switch (fe.getFieldId()) {
-					case 374: // IRGCOND
-						break;
 					case 9217: // ITVL_DATE
 						itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
 						break;
@@ -699,7 +719,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 											itvl_tm.getMinute(),
 											itvl_tm.getSecond(),
 											DateTimeZone.UTC);
-							stream.addResult ("datetime", '"' + datetime.toString() + '"');
+							row = '"' + datetime.toString() + '"';
 						} else if (entry.getData().getEncodedLength() < 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
 							byte[] encoded_time = encoded_data.getBytes();
@@ -718,7 +738,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 											secs,
 											millis,
 											DateTimeZone.UTC);
-							stream.addResult ("datetime", '"' + datetime.toString() + '"');
+							row = '"' + datetime.toString() + '"';
 						} else if (entry.getData().getEncodedLength() == 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
 							byte[] encoded_time = encoded_data.getBytes();
@@ -746,7 +766,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 											secs,
 											millis,
 											DateTimeZone.UTC);
-							stream.addResult ("datetime", '"' + datetime.toString() + '"');
+							row = '"' + datetime.toString() + '"';
 						}
 						break;
 					default:
@@ -754,17 +774,17 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 						switch (fiddef.getOMMType()) {
 						case OMMTypes.REAL:
 						case OMMTypes.UINT:
-							stream.addResult (fiddef.getName(), data.toString());
+							stream.addResult (row, fiddef.getName(), data.toString());
 							break;
 
 						case OMMTypes.ENUM:
-							stream.addResult (fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
+							stream.addResult (row, fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
 							break;
 
 						case OMMTypes.RMTES_STRING:
 						case OMMTypes.DATE:
 						case OMMTypes.TIME:
-							stream.addResult (fiddef.getName(), '"' + data.toString() + '"');
+							stream.addResult (row, fiddef.getName(), '"' + data.toString() + '"');
 							break;
 
 						default:
