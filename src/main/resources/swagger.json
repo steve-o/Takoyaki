@@ -1,7 +1,7 @@
 {
 	"swagger": "2.0",
 	"info": {
-		"title": "Thomson Reuters Analytics Cloud",
+		"title": "Thomson Reuters Content Services",
 		"version": "2.0"
 	},
 	"host": "${HOST}",
@@ -13,12 +13,240 @@
 		"application/json"
 	],
 	"paths": {
-		"/{ticker}/taq": {
+		"/{ticker}/days": {
 			"get": {
 				"tags": [
 					"History"
 				],
-				"summary": "Time and quotes",
+				"summary": "Daily rollups",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/weeks": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Weekly rollups",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/months": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Monthly rollups",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/quarters": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Quarterly rollups",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/years": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Yearly rollups",
 				"description": "Multiple ticker symbols can be provided with comma separated strings.",
 				"parameters": [
 					{
@@ -103,7 +331,64 @@
 					"200": {
 						"description": "successful operation",
 						"schema": {
-							"$ref": "#/definitions/tas"
+							"$ref": "#/definitions/history"
+						}
+					},
+					"404": {
+						"description": "ticker not found",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"503": {
+						"description": "service temporarily unavailable",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"schema": {
+							"$ref": "#/definitions/status"
+						}
+					}
+				}
+			}
+		},
+		"/{ticker}/taq": {
+			"get": {
+				"tags": [
+					"History"
+				],
+				"summary": "Time and quotes",
+				"description": "Multiple ticker symbols can be provided with comma separated strings.",
+				"parameters": [
+					{
+						"name": "ticker",
+						"in": "path",
+						"required": true,
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"collectionFormat": "csv",
+						"description": "Ticker symbol.",
+						"default": "NKE.N"
+					},
+					{
+						"name": "interval",
+						"in": "query",
+						"required": true,
+						"type": "string",
+						"description": "ISO 8601 interval.",
+						"default": "2015-06-11T05:00:00.000Z/P5D"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"schema": {
+							"$ref": "#/definitions/history"
 						}
 					},
 					"404": {

@@ -728,7 +728,13 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			}
 		}
 		else if ("tas".equals (techanalysis.get())
-			|| "taq".equals (techanalysis.get()))
+			|| "taq".equals (techanalysis.get())
+/* TBD: minutes to be deployed 2016 */
+			|| "days".equals (techanalysis.get())
+			|| "weeks".equals (techanalysis.get())
+			|| "months".equals (techanalysis.get())
+			|| "quarters".equals (techanalysis.get())
+			|| "years".equals (techanalysis.get()))
 		{
 			Interval parsed_interval;
 			if (timeinterval.isPresent()) {

@@ -322,10 +322,15 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
 				this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
 // MET_TF_U: 9=TAS, 10=TAQ
 				this.omm_encoder.encodeFieldEntryInit ((short)12794, OMMTypes.ENUM);
-				if (stream.getQuery().equals ("tas")) {
-					this.omm_encoder.encodeEnum (9);
-				} else if (stream.getQuery().equals ("taq")) {
-					this.omm_encoder.encodeEnum (10);
+				switch (stream.getQuery()) {
+				case "days":		this.omm_encoder.encodeEnum (4); break;
+				case "weeks":		this.omm_encoder.encodeEnum (5); break;
+				case "months":		this.omm_encoder.encodeEnum (6); break;
+				case "quarters":	this.omm_encoder.encodeEnum (7); break;
+				case "years":		this.omm_encoder.encodeEnum (8); break;
+				case "tas":		this.omm_encoder.encodeEnum (9); break;
+				case "taq":		this.omm_encoder.encodeEnum (10); break;
+				default: break;
 				}
 // RQT_S_DATE+RQT_STM_MS
 				this.omm_encoder.encodeFieldEntryInit ((short)9219, OMMTypes.DATE);
@@ -661,7 +666,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 					LOG.trace ("Unsupported data type ({}) in OMM series entry.", field_list.getType());
 					continue;
 				}
-				OMMDateTime itvl_date = null;
+				DateTime datetime = new DateTime (0, DateTimeZone.UTC);
 				String row = null;
 				for (Iterator jt = ((OMMIterable)field_list).iterator(); jt.hasNext();)
 				{
@@ -674,18 +679,21 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
 					switch (fe.getFieldId()) {
 					case 9217: // ITVL_DATE
-						itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
+						if (OMMTypes.DATE == fiddef.getOMMType()) {
+							final OMMDateTime itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
+							datetime = datetime.withDate (itvl_date.getYear(),
+											itvl_date.getMonth(),
+											itvl_date.getDate());
+							row = '"' + datetime.toString() + '"';
+						}
 						break;
 					case 14223: // ITVL_TM_MS
 						if (entry.getData().getEncodedLength() < 5) {
 							final OMMDateTime itvl_tm = (OMMDateTime)fe.getData (fiddef.getOMMType());
-							final DateTime datetime = new DateTime (itvl_date.getYear(),
-											itvl_date.getMonth(),
-											itvl_date.getDate(),
-											itvl_tm.getHour(),
+							datetime = datetime.withTime (itvl_tm.getHour(),
 											itvl_tm.getMinute(),
 											itvl_tm.getSecond(),
-											DateTimeZone.UTC);
+											0);
 							row = '"' + datetime.toString() + '"';
 						} else if (entry.getData().getEncodedLength() < 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
@@ -697,14 +705,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 							if (millis > 999) {
 								millis = 0;
 							}
-							final DateTime datetime = new DateTime (itvl_date.getYear(),
-											itvl_date.getMonth(),
-											itvl_date.getDate(),
-											hours,
-											mins,
-											secs,
-											millis,
-											DateTimeZone.UTC);
+							datetime = datetime.withTime (hours, mins, secs, millis);
 							row = '"' + datetime.toString() + '"';
 						} else if (entry.getData().getEncodedLength() == 8) {
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
@@ -725,14 +726,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 							if (nanos > 999) {
 								nanos = 0;
 							}
-							final DateTime datetime = new DateTime (itvl_date.getYear(),
-											itvl_date.getMonth(),
-											itvl_date.getDate(),
-											hours,
-											mins,
-											secs,
-											millis,
-											DateTimeZone.UTC);
+							datetime = datetime.withTime (hours, mins, secs, millis);
 							row = '"' + datetime.toString() + '"';
 						}
 						break;
