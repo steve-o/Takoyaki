@@ -696,7 +696,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 							datetime = datetime.withYear (itvl_date.getYear())
 										.withMonth (itvl_date.getMonth())
 										.withDayOfMonth (itvl_date.getDate());
-							row = '"' + datetime.toString() + '"';
+							row = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					case 14223: // ITVL_TM_MS
