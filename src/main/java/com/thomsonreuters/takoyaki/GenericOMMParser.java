@@ -678,7 +678,7 @@ public final class GenericOMMParser
                             OMMData data = null;
                             if (fe.getDataType() == OMMTypes.UNKNOWN)
 			    {
-if (fiddef.getOMMType() == OMMTypes.TIME) {
+/* if (fiddef.getOMMType() == OMMTypes.TIME) {
   if (entry.getData().getEncodedLength() != 8)
     data = fe.getData(fiddef.getOMMType());
   else {
@@ -695,7 +695,7 @@ if (fiddef.getOMMType() == OMMTypes.TIME) {
 		hours, mins, secs, millis, micros, nanos);
     break;
   }
-} else
+} else*/
                                 data = fe.getData(fiddef.getOMMType());
 			    }
                             else

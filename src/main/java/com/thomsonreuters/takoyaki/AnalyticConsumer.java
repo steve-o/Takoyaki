@@ -9,6 +9,11 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.*;
+// Java 8
+import java.time.Instant;
+import java.time.temporal.ChronoField;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
@@ -26,6 +31,9 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Floats;
+import com.google.common.primitives.Ints;
+import com.google.common.primitives.UnsignedBytes;
+import com.google.common.primitives.Shorts;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.reuters.rfa.common.Client;
@@ -612,6 +620,29 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 			}
 		}
 
+	private static final boolean TEST_RWF15_TIME_ENCODING	= false;
+	private static final boolean USE_RWF15_TIME_ENCODING	= false;
+
+	private OMMMsg CreateTestMsg() {
+		omm_encoder.initialize(OMMTypes.MSG, 500);
+		OMMMsg msg = omm_pool.acquireMsg();
+		msg.setMsgType(OMMMsg.MsgType.UPDATE_RESP);
+		msg.setMsgModelType(RDMMsgTypes.MARKET_PRICE);
+		msg.setIndicationFlags(OMMMsg.Indication.DO_NOT_CONFLATE);
+		msg.setRespTypeNum(RDMInstrument.Update.QUOTE);
+		omm_encoder.encodeMsgInit(msg, OMMTypes.NO_DATA, OMMTypes.SERIES);
+		omm_encoder.encodeSeriesInit(OMMSeries.HAS_TOTAL_COUNT_HINT, OMMTypes.FIELD_LIST, 1);
+		omm_encoder.encodeSeriesEntryInit();
+		omm_encoder.encodeFieldListInit(OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
+		omm_encoder.encodeFieldEntryInit((short)14223, OMMTypes.TIME);
+		omm_encoder.encodeTime(23, 59, 58, 123, 999, 512);
+// special blank values
+//		omm_encoder.encodeTime(255, 255, 255, 65535, 2047, 2047);
+		omm_encoder.encodeAggregateComplete();
+		omm_encoder.encodeAggregateComplete();
+		return (OMMMsg)omm_encoder.getEncodedObject();
+	}
+
 /* Elektron Time Series refresh */
 		private boolean OnHistoryResponse (OMMMsg msg, AnalyticStream stream) {
 			LOG.trace ("OnHistoryResponse: {}", msg);
@@ -622,32 +653,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 				return false;
 			}
 
-	                final OMMSeries series = (OMMSeries)msg.getPayload();
-
-/*
-			if (!stream.hasResult()) {
-				if (!series.has (OMMSeries.HAS_DATA_DEFINITIONS)) {
-					LOG.trace ("Unsupported aggregate header ({}) in OMM response.", msg.getDataType());
-					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
-					this.destroyItemStream (stream);
-					return false;
-				}
-				short dbtype = series.getDataType() == OMMTypes.FIELD_LIST ? OMMTypes.FIELD_LIST_DEF_DB : OMMTypes.ELEMENT_LIST_DEF_DB;
-				final OMMDataDefs datadefs = series.getDataDefs();
-				final DataDefDictionary listDefDb = DataDefDictionary.create (dbtype);
-				DataDefDictionary.decodeOMMDataDefs (listDefDb, datadefs);
-				for (Iterator listDefDbIter = listDefDb.iterator(); listDefDbIter.hasNext();)
-				{
-					DataDef listdef = (DataDef)listDefDbIter.next();
-					for (Iterator listdefIter = listdef.iterator(); listdefIter.hasNext();)
-					{
-						final FieldEntryDef ommEntry = (FieldEntryDef)listdefIter.next();
-						final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (ommEntry.getFieldId());
-						stream.putResultFid (fiddef.getName());
-					}
-				}
-			}
-*/
+	                final OMMSeries series = TEST_RWF15_TIME_ENCODING ? (OMMSeries)CreateTestMsg().getPayload() : (OMMSeries)msg.getPayload();
 
 // flatten to dataframe.
 // SERIES 
@@ -666,7 +672,8 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 					LOG.trace ("Unsupported data type ({}) in OMM series entry.", field_list.getType());
 					continue;
 				}
-				DateTime datetime = new DateTime (0, DateTimeZone.UTC);
+//				DateTime datetime = new DateTime (0, DateTimeZone.UTC);
+				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
 				String row = null;
 				for (Iterator jt = ((OMMIterable)field_list).iterator(); jt.hasNext();)
 				{
@@ -681,53 +688,63 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 					case 9217: // ITVL_DATE
 						if (OMMTypes.DATE == fiddef.getOMMType()) {
 							final OMMDateTime itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
-							datetime = datetime.withDate (itvl_date.getYear(),
-											itvl_date.getMonth(),
-											itvl_date.getDate());
+//							datetime = datetime.withDate (itvl_date.getYear(),
+//											itvl_date.getMonth(),
+//											itvl_date.getDate());
+//							row = '"' + datetime.toString() + '"';
+/* Cannot specify Instant.with(YEAR) */
+							datetime = datetime.withYear (itvl_date.getYear())
+										.withMonth (itvl_date.getMonth())
+										.withDayOfMonth (itvl_date.getDate());
 							row = '"' + datetime.toString() + '"';
 						}
 						break;
 					case 14223: // ITVL_TM_MS
-						if (entry.getData().getEncodedLength() < 5) {
+						if (USE_RWF15_TIME_ENCODING) {
+/* Will crash on broken encoding */
 							final OMMDateTime itvl_tm = (OMMDateTime)fe.getData (fiddef.getOMMType());
-							datetime = datetime.withTime (itvl_tm.getHour(),
-											itvl_tm.getMinute(),
-											itvl_tm.getSecond(),
-											0);
-							row = '"' + datetime.toString() + '"';
-						} else if (entry.getData().getEncodedLength() < 8) {
+/* OMMDateTime.getMillisecond() requires RFAv8 */
+//							datetime = datetime.withTime (itvl_tm.getHour(),
+//											itvl_tm.getMinute(),
+//											itvl_tm.getSecond(),
+//											itvl_tm.getMillisecond());
+//							row = '"' + datetime.toString() + '"';
+							datetime = datetime.withHour (itvl_tm.getHour())
+									.withMinute (itvl_tm.getMinute())
+									.withSecond (itvl_tm.getSecond())
+									.withNano ((((itvl_tm.getMillisecond() * 1000) + itvl_tm.getMicrosecond()) * 1000) + itvl_tm.getNanosecond());
+/* convert to get standard ISO 8601 Zulu "Z" suffix, otherwise "[UTC]" will apear */
+							row = '"' + datetime.toInstant().toString() + '"';
+						} else {
+/* fails miserably for any blank units as encoded length will be shorter than expected. */
 							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
 							byte[] encoded_time = encoded_data.getBytes();
-							int hours  = encoded_time[0];
-							int mins   = encoded_time[1];
-							int secs   = encoded_time[2];
-							int millis = ((encoded_time[3] * 256) + encoded_time[4]) & 0xffff;
-							if (millis > 999) {
-								millis = 0;
+							int hours  = UnsignedBytes.toInt (encoded_time[0]);
+							int mins   = UnsignedBytes.toInt (encoded_time[1]);
+							int secs   = 0;
+/* very weird OMM demarcation of fractional seconds */
+							int millis = 0;
+							int micros = 0;
+							int nanos  = 0;
+							if (entry.getData().getEncodedLength() == 8) {
+								nanos = Shorts.fromBytes ((byte)(encoded_time[5] >> 3), encoded_time[7]);
 							}
-							datetime = datetime.withTime (hours, mins, secs, millis);
-							row = '"' + datetime.toString() + '"';
-						} else if (entry.getData().getEncodedLength() == 8) {
-							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
-							byte[] encoded_time = encoded_data.getBytes();
-							long word = (encoded_time[5] * 256 * 256) + (encoded_time[6] * 256) + encoded_time[7];
-							int hours  = encoded_time[0];
-							int mins   = encoded_time[1];
-							int secs   = encoded_time[2];
-							int millis = ((encoded_time[3] * 256) + encoded_time[4]) & 0xffff;
-							int micros = (int)(word / 2048) & 0x7ff;
-							int nanos  = (int)(word % 2048) & 0x7ff;
-							if (millis > 999) {
-								millis = 0;
+							if (entry.getData().getEncodedLength() >= 7) {
+								micros = Shorts.fromBytes ((byte)(encoded_time[5] & 0x7), encoded_time[6]);
 							}
-							if (micros > 999) {
-								micros = 0;
+							if (entry.getData().getEncodedLength() > 3) {
+								millis = Shorts.fromBytes (encoded_time[3], encoded_time[4]);
 							}
-							if (nanos > 999) {
-								nanos = 0;
+							if (entry.getData().getEncodedLength() > 2) {
+								secs   = UnsignedBytes.toInt (encoded_time[2]);
 							}
-							datetime = datetime.withTime (hours, mins, secs, millis);
-							row = '"' + datetime.toString() + '"';
+//							datetime = datetime.withTime (hours, mins, secs, millis);
+//							row = '"' + datetime.toString() + '"';
+							datetime = datetime.withHour (hours)
+									.withMinute (mins)
+									.withSecond (secs)
+									.withNano ((((millis * 1000) + micros) * 1000) + nanos);
+							row = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					default:

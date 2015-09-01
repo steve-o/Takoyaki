@@ -50,30 +50,14 @@ import com.reuters.rfa.rdm.RDMService;
 import com.reuters.rfa.rdm.RDMUser;
 import com.reuters.rfa.session.DataDictInfo;
 import com.reuters.rfa.session.event.ConnectionEvent;
-import com.reuters.rfa.session.event.EntitlementsAuthenticationEvent;
-import com.reuters.rfa.session.event.MarketDataDictEvent;
-import com.reuters.rfa.session.event.MarketDataDictStatus;
-import com.reuters.rfa.session.event.MarketDataItemEvent;
-import com.reuters.rfa.session.event.MarketDataItemStatus;
-import com.reuters.rfa.session.event.MarketDataSvcEvent;
-import com.reuters.rfa.session.event.MarketDataSvcStatus;
 import com.reuters.rfa.session.Session;
 import com.reuters.rfa.session.TimerIntSpec;
-import com.reuters.rfa.session.MarketDataDictSub;
-import com.reuters.rfa.session.MarketDataEnums;
-import com.reuters.rfa.session.MarketDataItemSub;
-import com.reuters.rfa.session.MarketDataSubscriber;
-import com.reuters.rfa.session.MarketDataSubscriberInterestSpec;
 import com.reuters.rfa.session.omm.OMMConnectionEvent;
 import com.reuters.rfa.session.omm.OMMConnectionIntSpec;
 import com.reuters.rfa.session.omm.OMMConsumer;
 import com.reuters.rfa.session.omm.OMMErrorIntSpec;
 import com.reuters.rfa.session.omm.OMMItemEvent;
 import com.reuters.rfa.session.omm.OMMItemIntSpec;
-import com.reuters.tibmsg.TibException;
-import com.reuters.tibmsg.TibField;
-import com.reuters.tibmsg.TibMsg;
-import com.reuters.tibmsg.TibMfeedDict;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionary;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryCache;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryRequest;
@@ -110,11 +94,6 @@ public class Consumer implements Client {
         private OMMPool omm_pool;
 	private OMMEncoder omm_encoder;
 
-/* RFA market data subscriber interface. */
-	private MarketDataDictSub market_data_dictionary_subscriber;
-	private MarketDataSubscriber market_data_subscriber;
-	private TibMsg msg;
-	private TibField field;
 	private Set<Integer> field_set;
 
 /* JSON serialisation */
@@ -240,31 +219,6 @@ public class Consumer implements Client {
 			this.sendLoginRequest();
 			this.sendDirectoryRequest();
 		}
-		else if (this.config.getProtocol().equalsIgnoreCase (SSLED_PROTOCOL))
-		{
-/* Initializing a Market Data Subscriber. */
-			LOG.trace ("Creating market data subscriber.");
-			this.market_data_subscriber = (MarketDataSubscriber)this.session.createEventSource (EventSource.MARKET_DATA_SUBSCRIBER,
-						this.config.getConsumerName(),
-						false /* complete events */);
-
-			LOG.trace ("Registering market data status interest.");
-			MarketDataSubscriberInterestSpec marketDataSubscriberInterestSpec = new MarketDataSubscriberInterestSpec();
-			marketDataSubscriberInterestSpec.setMarketDataSvcInterest (true);
-			marketDataSubscriberInterestSpec.setConnectionInterest (true);
-			marketDataSubscriberInterestSpec.setEntitlementsInterest (false);
-			this.error_handle = this.market_data_subscriber.registerClient (this.event_queue, marketDataSubscriberInterestSpec, this, null);
-
-/* Initializing a Market Data Dictionary Subscriber. */
-			this.market_data_dictionary_subscriber = new MarketDataDictSub();
-
-/* TibMsg memory management. */
-			this.msg = new TibMsg();
-			this.field = new TibField();
-
-/* No required login process, albeit status could be tied to connection status. */
-			this.pending_logon = false;
-		}
 		else
 		{
 			throw new Exception ("Unsupported transport protocol \"" + this.config.getProtocol() + "\".");
@@ -276,29 +230,6 @@ public class Consumer implements Client {
 	}
 
 	public void clear() {
-		if (null != this.market_data_subscriber) {
-			LOG.trace ("Closing MarketDataSubscriber.");
-			if (UNSUBSCRIBE_ON_SHUTDOWN) {
-/* 9.9.3 Upstream Batching
- * Market Data Subscriber’s unsubscribeAll() can be used to encourage RFA Java to batch unsubscribe
- * requests on connections that support batching of those requests into a message.
- */
-				this.market_data_subscriber.unsubscribeAll();
-				if (null != this.directory && !this.directory.isEmpty())
-					this.directory.clear();
-				if (null != this.error_handle) {
-					this.market_data_subscriber.unregisterClient (this.error_handle);
-					this.error_handle = null;
-				}
-			} else {
-				if (null != this.directory && !this.directory.isEmpty())
-					this.directory.clear();
-				if (null != this.error_handle)
-					this.error_handle = null;
-			}
-			this.market_data_subscriber.destroy();
-			this.market_data_subscriber = null;
-		}
 		if (null != this.rdm_dictionary)
 			this.rdm_dictionary = null;
 		if (null != this.omm_encoder)
@@ -400,14 +331,6 @@ public class Consumer implements Client {
 				this.batchSendItemRequest (batch);
 			LOG.trace ("Directory size: {}", this.directory.size());
 		}
-		else
-		{
-			for (int i = 0; i < item_names.length; ++i) {
-				LOG.trace ("{}: {}", (1 + i), item_names[i]);
-				final Instrument instrument = new Instrument (service_name, item_names[i], field_names);
-				this.createItemStream (instrument, item_streams[i]);
-			}
-		}
 	}
 
 /* Create an item stream for a given symbol name.  The Item Stream maintains
@@ -431,10 +354,6 @@ public class Consumer implements Client {
 				item_stream.setViewByFid (this.createViewByFid (this.rdm_dictionary.getFieldDictionary().toNameMap(), item_stream.getViewByName()));
 				this.sendItemRequest (item_stream);
 			}
-			else if (this.config.getProtocol().equalsIgnoreCase (SSLED_PROTOCOL)) {
-				item_stream.setViewByFid (this.createViewByFid (this.appendix_a, item_stream.getViewByName()));
-				this.addSnapshot (item_stream);
-			}
 		}
 		this.directory.put (this.sb.toString(), item_stream);
 		LOG.trace ("Directory size: {}", this.directory.size());
@@ -450,25 +369,8 @@ public class Consumer implements Client {
 		if (this.config.getProtocol().equalsIgnoreCase (RSSL_PROTOCOL)) {
 			this.cancelItemRequest (item_stream);
 		}
-		else if (this.config.getProtocol().equalsIgnoreCase (SSLED_PROTOCOL)) {
-			this.removeSnapshot (item_stream);
-		}
 		this.directory.remove (this.sb.toString());
 		LOG.trace ("Directory size: {}", this.directory.size());
-	}
-
-/* Create a basic immutable map of MarketFeed FID names to FID values */
-	private ImmutableMap<String, Integer> createDictionaryMap() {
-		final Map<String, Integer> map = Maps.newLinkedHashMap();
-		if (TibMsg.GetMfeedDictNumFids() > 0) {
-			final TibMfeedDict mfeed_dictionary[] = TibMsg.GetMfeedDictionary();
-			for (int i = 0; i < mfeed_dictionary.length; i++) {
-				if (null == mfeed_dictionary[i]) continue;
-				final int fid = (i > TibMsg.GetMfeedDictPosFids()) ? (TibMsg.GetMfeedDictPosFids() - i) : i;
-				map.put (mfeed_dictionary[i].fname, new Integer (fid));
-			}
-		}
-		return ImmutableMap.copyOf (map);
 	}
 
 /* Convert a view by FID name to a view by FID values */
@@ -509,23 +411,6 @@ public class Consumer implements Client {
 			}
 			if (!batch.isEmpty())
 				this.batchSendItemRequest (batch);
-		}
-		else if (this.config.getProtocol().equalsIgnoreCase (SSLED_PROTOCOL))
-		{
-			if (null == this.market_data_subscriber) {
-				LOG.warn ("Resubscribe whilst subscriber is invalid.");
-				return;
-			}
-
-/* foreach directory item stream */
-			for (ItemStream item_stream : this.directory.values()) {
-				if (!item_stream.hasViewByFid()) {
-					item_stream.setViewByFid (this.createViewByFid (this.appendix_a, item_stream.getViewByName()));
-				}
-				if (!item_stream.hasItemHandle()) {
-					this.addSnapshot (item_stream);
-				}
-			}
 		}
 	}
 
@@ -634,24 +519,6 @@ public class Consumer implements Client {
 			this.omm_consumer.unregisterClient (item_stream.getItemHandle());
 		} else {
 			LOG.trace ("Market price request closed by RFA.");
-		}
-	}
-
-	private void addSnapshot (ItemStream item_stream) {
-		MarketDataItemSub marketDataItemSub = new MarketDataItemSub();
-		marketDataItemSub.setServiceName (item_stream.getServiceName());
-		marketDataItemSub.setItemName (item_stream.getItemName());
-		marketDataItemSub.setSnapshotReq (true);
-		LOG.trace ("Adding market data snapshot.");
-		item_stream.setItemHandle (this.market_data_subscriber.subscribe (this.event_queue, marketDataItemSub, this, item_stream));
-	}
-
-	private void removeSnapshot (ItemStream item_stream) {
-		if (item_stream.hasItemHandle()) {
-			LOG.trace ("Removing market data snapshot.");
-			this.market_data_subscriber.unsubscribe (item_stream.getItemHandle());
-		} else {
-			LOG.trace ("Market data snapshot closed by RFA.");
 		}
 	}
 
@@ -776,13 +643,6 @@ public class Consumer implements Client {
 			new FlaggedHandle (this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, dictionary_name /* closure */)));
 	}
 
-	private void addDictionarySubscription (DataDictInfo dictionary_info) {
-		LOG.trace ("Sending dictionary request for \"{}\".", dictionary_info.getDictType().toString());
-		this.market_data_dictionary_subscriber.setDataDictInfo (dictionary_info);
-		this.dictionary_handle.put (dictionary_info.getDictType().toString(),
-			new FlaggedHandle (this.market_data_subscriber.subscribe (this.event_queue, this.market_data_dictionary_subscriber, this, dictionary_info.getDictType().toString() /* closure */)));
-	}
-
 	@Override
 	public void processEvent (Event event) {
 		LOG.trace (event);
@@ -793,26 +653,6 @@ public class Consumer implements Client {
 
 		case Event.OMM_CONNECTION_EVENT:
 			this.OnConnectionEvent ((OMMConnectionEvent)event);
-			break;
-
-		case Event.MARKET_DATA_ITEM_EVENT:
-			this.OnMarketDataItemEvent ((MarketDataItemEvent)event);
-			break;
-
-		case Event.MARKET_DATA_SVC_EVENT:
-			this.OnMarketDataSvcEvent ((MarketDataSvcEvent)event);
-			break;
-
-		case Event.MARKET_DATA_DICT_EVENT:
-			this.OnMarketDataDictEvent ((MarketDataDictEvent)event);
-			break;
-
-		case Event.CONNECTION_EVENT:
-			this.OnConnectionEvent ((ConnectionEvent)event);
-			break;
-
-		case Event.ENTITLEMENTS_AUTHENTICATION_EVENT:
-			this.OnEntitlementsAuthenticationEvent ((EntitlementsAuthenticationEvent)event);
 			break;
 
 		default:
@@ -1295,316 +1135,6 @@ public class Consumer implements Client {
 			this.code = code;
 			this.text = text;
 		}
-	}
-
-	private void OnMarketDataItemEvent (MarketDataItemEvent event) {
-		final ItemStream item_stream = (ItemStream)event.getClosure();
-		LOG.trace ("OnMarketDataItemEvent: {}", event);
-		if (event.isEventStreamClosed()) {
-			LOG.trace ("Subscription handle for \"{}\" is closed.", event.getItemName());
-			item_stream.clearItemHandle();
-		}
-/* strings in switch are not supported in -source 1.6 */
-/* ignore updates and verify messages */
-		if (MarketDataItemEvent.IMAGE == event.getMarketDataMsgType()) {
-/* fall through */
-		}
-		else if (MarketDataItemEvent.UPDATE == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring update.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-		else if (MarketDataItemEvent.UNSOLICITED_IMAGE == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring unsolicited image.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-		else if (MarketDataItemEvent.STATUS == event.getMarketDataMsgType()) {
-			LOG.trace ("Status: {}", event);
-
-/* MARKET_DATA_ITEM_EVENT, service = ELEKTRON_EDGE, item = RBK,
- * MarketDataMessageType = STATUS, MarketDataItemStatus = { state: CLOSED,
- * code: NONE, text: "The record could not be found"}, data = NULL
- */
-
-/* Item stream recovered. */
-			if (MarketDataItemStatus.OK == event.getStatus().getState())
-				return;
-
-/* Rewrite to RSSL/OMM semantics, (Stream,Data,Code)
- *
- * Examples: OPEN,OK,NONE
- * 	     - The item is served by the provider. The consumer application established
- * 	       the item event stream.
- *
- * 	     OPEN,SUSPECT,NO_RESOURCES
- * 	     - The provider does not offer data for the requested item at this time.
- * 	       However, the system will try to recover this item when available.
- *
- * 	     CLOSED_RECOVER,SUSPECT,NO_RESOURCES
- * 	     - The provider does not offer data for the requested item at this time. The
- * 	       application can try to re-request the item later.
- *
- * 	     CLOSED,SUSPECT,/any/
- * 	     -  The item is not open on the provider, and the application should close this
- * 	        stream.
- */
-			String stream_state = "OPEN", data_state = "NO_CHANGE";
-			if (event.isEventStreamClosed()
-				|| MarketDataItemStatus.CLOSED == event.getStatus().getState())
-			{
-				stream_state = "CLOSED";
-				data_state = "SUSPECT";
-			}
-			else if (MarketDataItemStatus.CLOSED_RECOVER == event.getStatus().getState())
-			{
-				stream_state = "CLOSED_RECOVER";
-				data_state = "SUSPECT";
-			}
-			else if (MarketDataItemStatus.STALE == event.getStatus().getState())
-			{
-				data_state = "SUSPECT";
-			}
-
-/* Defer to GSON to escape status text. */
-			LogMessage msg = new LogMessage (
-					"STATUS",
-					item_stream.getServiceName(),
-					item_stream.getItemName(),
-					stream_state,
-					data_state,
-					event.getStatus().getStatusCode().toString(),
-					event.getStatus().getStatusText()
-					);
-			item_stream.getDispatcher().dispatch (item_stream, this.gson.toJson (msg));
-			this.destroyItemStream (item_stream);
-			return;
-		}
-/* Available in SSL if useMarketfeedUpdateType set True so that updates are inspected for
- * underlying type, whether Correction (317) or a Closing Run (312).
- */
-		else if (MarketDataItemEvent.CORRECTION == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring correction.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-		else if (MarketDataItemEvent.CLOSING_RUN == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring closing run.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-		else if (MarketDataItemEvent.RENAME == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring rename.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-		else if (MarketDataItemEvent.PERMISSION_DATA == event.getMarketDataMsgType()) {
-			LOG.trace ("Ignoring permission data.");
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-/* GROUP_CHANGE is deprecated */
-		else {
-			LOG.trace ("Unhandled market data message type ({}).", event.getMarketDataMsgType());
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-
-		if (MarketDataEnums.DataFormat.MARKETFEED != event.getDataFormat()) {
-			this.sb.setLength (0);
-			switch (event.getDataFormat()) {
-			case MarketDataEnums.DataFormat.UNKNOWN:
-				this.sb.append ("Unknown");
-				break;
-			case MarketDataEnums.DataFormat.ANSI_PAGE:
-				this.sb.append ("ANSI_Page");
-				break;
-			case MarketDataEnums.DataFormat.MARKETFEED:
-				this.sb.append ("Marketfeed");
-				break;
-			case MarketDataEnums.DataFormat.QFORM:
-				this.sb.append ("QForm");
-				break;
-/* TibMsg self-describing */
-			case MarketDataEnums.DataFormat.TIBMSG:
-				this.sb.append ("TibMsg");
-				break;
-			case MarketDataEnums.DataFormat.IFORM:
-			default:
-				this.sb.append (event.getDataFormat());
-				break;
-			}
-
-			LOG.trace ("Unsupported data format ({}) in market data item event.", this.sb.toString());
-			if (event.isEventStreamClosed()) {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-			return;
-		}
-
-		final byte[] data = event.getData();
-		final int length = (data != null ? data.length : 0);
-		if (0 == length) {
-/* abort early as limited probability of receiving subsequent valid image */
-			item_stream.getDispatcher().dispatch (item_stream, "internal error");
-			this.destroyItemStream (item_stream);
-			return;
-		}
-
-		try {
-			this.msg.UnPack (data);
-			if (LOG.isDebugEnabled()) {
-				for (int status = this.field.First (msg);
-					TibMsg.TIBMSG_OK == status;
-					status = this.field.Next())
-				{
-					LOG.debug (new StringBuilder()
-						.append (this.field.Name())
-						.append (": ")
-						.append (this.field.StringData())
-						.toString());
-				}
-			}
-
-/* Do not use GSON as fields map would be expensive to create. */
-			this.sb.setLength (0);
-			this.sb .append ('{')
-				 .append ("\"recordname\":\"").append (item_stream.getItemName()).append ('\"')
-				.append (",\"fields\":{");
-/* Use field_set to also count matching FIDs in update to view */
-			this.field_set.clear();
-			if (item_stream.hasViewByFid()) {
-				final ImmutableSortedSet<Integer> view = item_stream.getViewByFid();
-				for (int status = this.field.First (msg);
-					TibMsg.TIBMSG_OK == status;
-					status = this.field.Next())
-				{
-					if (view.contains (field.MfeedFid())) {
-						if (!this.field_set.isEmpty()) this.sb.append (',');
-						this.sb.append ('\"').append (this.field.Name()).append ("\":");
-						switch (this.field.Type()) {
-/* values that can be represented raw in JSON form */
-						case TibMsg.TIBMSG_BOOLEAN:
-						case TibMsg.TIBMSG_INT:
-						case TibMsg.TIBMSG_REAL:
-						case TibMsg.TIBMSG_UINT:
-							this.sb.append (this.field.StringData());
-							break;
-						default:
-							this.sb.append ('\"').append (this.field.StringData()).append ('\"');
-							break;
-						}
-						this.field_set.add (this.field.MfeedFid());
-						if (view.size() == this.field_set.size()) break;
-					}
-				}
-			}
-			this.sb.append ("}}");
-/* Ignore updates with no matching fields */
-			if (!this.field_set.isEmpty()) {
-				item_stream.getDispatcher().dispatch (item_stream, this.sb.toString());
-				this.destroyItemStream (item_stream);
-			} else {
-				item_stream.getDispatcher().dispatch (item_stream, "internal error");
-				this.destroyItemStream (item_stream);
-			}
-		} catch (TibException e) {
-			LOG.trace ("Unable to unpack data with TibMsg: {}", e.getMessage());
-			item_stream.getDispatcher().dispatch (item_stream, "internal error");
-			this.destroyItemStream (item_stream);
-		}
-	}
-
-	private void OnMarketDataSvcEvent (MarketDataSvcEvent event) {
-		LOG.trace ("OnMarketDataSvcEvent: {}", event);
-/* We only desire a single directory response with UP status to request dictionaries, ignore all other updates */
-		if (!this.pending_directory)
-			 return;
-/* Wait for any service to be up instead of one named service */
-		if (/* event.getServiceName().equals (this.config.getServiceName())
-			&& */ MarketDataSvcStatus.UP == event.getStatus().getState())
-		{
-/* start dictionary subscription */
-			final DataDictInfo[] dataDictInfo = event.getDataDictInfo();
-			for (int i = 0; i < dataDictInfo.length; ++i) {
-				if (!this.dictionary_handle.containsKey (dataDictInfo[i].getDictType().toString())) 
-					this.addDictionarySubscription (dataDictInfo[i]);
-			}
-
-			if (this.dictionary_handle.isEmpty()) {
-				LOG.trace ("No dictionary available to request, waiting for dictionary information in directory update.");
-				return;
-			}
-		}
-	}
-
-	private void OnMarketDataDictEvent (MarketDataDictEvent event) {
-		LOG.trace ("OnMarketDataDictEvent: {}", event);
-		if (MarketDataDictStatus.OK == event.getStatus().getState()) {
-			final byte[] data = event.getData();
-			final int length = (data != null ? data.length : 0);
-			if (0 == length) return;
-
-			try {
-/* Use new message object so not to waste space */
-				TibMsg msg = new TibMsg();
-				msg.UnPack (data);
-				if (DataDictInfo.MARKETFEED == event.getDataDictInfo().getDictType()) {
-					TibMsg.UnPackMfeedDictionary (msg);
-					LOG.trace ("MarketFeed dictionary unpacked.");
-				}
-			} catch (TibException e) {
-				LOG.trace ("Unable to unpack dictionary with TibMsg: {}", e.getMessage());
-				return;
-			}
-			
-			this.dictionary_handle.get ((String)event.getClosure()).setFlag();
-/* Check all pending dictionaries */
-			int pending_dictionaries = this.dictionary_handle.size();
-			for (FlaggedHandle flagged_handle : this.dictionary_handle.values()) {
-				if (flagged_handle.isFlagged())
-					--pending_dictionaries;
-			}
-			if (0 == pending_dictionaries) {
-				LOG.trace ("All used dictionaries loaded, resuming subscriptions.");
-				this.appendix_a = this.createDictionaryMap();
-				this.pending_dictionary = false;
-				this.resubscribe();
-			} else {
-				LOG.trace ("Dictionaries pending: {}", pending_dictionaries);
-			}
-		}
-	}
-
-	private void OnConnectionEvent (ConnectionEvent event) {
-		LOG.trace ("OnConnectionEvent: {}", event);
-		LOG.info ("Connection status {}", event.getConnectionStatus().toString());
-	}
-
-	private void OnEntitlementsAuthenticationEvent (EntitlementsAuthenticationEvent event) {
-		LOG.trace ("OnEntitlementsAuthenticationEvent: {}", event);
 	}
 }
 

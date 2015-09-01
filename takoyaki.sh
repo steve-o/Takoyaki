@@ -2,6 +2,7 @@
 
 JAVA=/usr/java/jdk1.8.0/bin/java
 #JAVA=java
+JAVA_HOME=
 
 # Hard fail support
 ENABLEASSERTIONS=-enableassertions

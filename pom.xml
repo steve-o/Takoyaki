@@ -18,8 +18,8 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.1</version>
         <configuration>
-          <source>1.7</source>
-          <target>1.7</target>
+          <source>1.8</source>
+          <target>1.8</target>
           <showDeprecation>true</showDeprecation>
           <compilerArguments>
             <Xlint:unchecked />
@@ -29,19 +29,9 @@
         </configuration>
         <dependencies>
           <dependency>
-            <groupId>com.google.errorprone</groupId>
-            <artifactId>error_prone_core</artifactId>
-            <version>1.1.2</version>
-          </dependency>
-          <dependency>
-            <groupId>org.codehaus.plexus</groupId>
-            <artifactId>plexus-compiler-javac</artifactId>
-            <version>2.3</version>
-          </dependency>
-          <dependency>
             <groupId>org.codehaus.plexus</groupId>
             <artifactId>plexus-compiler-javac-errorprone</artifactId>
-            <version>2.3</version>
+            <version>2.5</version>
           </dependency>
         </dependencies>
       </plugin>
@@ -129,9 +119,9 @@
     <dependency>
       <groupId>com.reuters.rfa</groupId>
       <artifactId>rfa</artifactId>
-      <version>7.6.0</version>
+      <version>8.0.0</version>
       <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/rfaj7.6.0.L1.all.rrg/Libs/rfa.jar</systemPath>
+      <systemPath>${project.basedir}/third_party/rfaj8.0.0.L2.all.rrg/Libs/rfa.jar</systemPath>
     </dependency>
     <dependency>
       <groupId>com.thomsonreuters.rfa.valueadd.domainrep</groupId>
