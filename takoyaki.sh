@@ -38,12 +38,15 @@ RFA=rfa.jar
 RFA=rfa.java8.jar
 RFAVALUEADD=ValueAdd_DomainRep.jar
 
+# Thomson Reuters UPA
+UPA=upa.jar
+
 # ZeroMQ
 ZMQ=jeromq-0.3.2.jar
 
 set -x
 $JAVA \
-	-cp $TAKOYAKI:$COMMONSCLI:$GUAVA:$GSON:$JODA:$LOG4J2:$RFA:$RFAVALUEADD:$ZMQ \
+	-cp $TAKOYAKI:$COMMONSCLI:$GUAVA:$GSON:$JODA:$LOG4J2:$RFA:$RFAVALUEADD:$UPA:$ZMQ \
 	-Dlog4j.configurationFile=log4j2.xml \
 	$ENABLEASSERTIONS \
 	$ENABLEDISRUPTOR \
