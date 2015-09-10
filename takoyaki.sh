@@ -31,7 +31,7 @@ LOG4J2=$LOG4J2:$SLF4JBINDING:$SLF4JAPI:$JAVAUTILLOGGINGAPI
 DISRUPTOR=disruptor-3.2.1.jar
 LOG4J2=$LOG4J2:$DISRUPTOR
 ENABLEDISRUPTOR=-DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector
-##ENABLEDISRUPTOR=
+ENABLEDISRUPTOR=
 
 # Thomson Reuters RFA and ValueAdd libraries
 RFA=rfa.jar
@@ -40,13 +40,14 @@ RFAVALUEADD=ValueAdd_DomainRep.jar
 
 # Thomson Reuters UPA
 UPA=upa.jar
+UPAVALUEADD=upaValueAdd.jar
 
 # ZeroMQ
 ZMQ=jeromq-0.3.2.jar
 
 set -x
 $JAVA \
-	-cp $TAKOYAKI:$COMMONSCLI:$GUAVA:$GSON:$JODA:$LOG4J2:$RFA:$RFAVALUEADD:$UPA:$ZMQ \
+	-cp $TAKOYAKI:$COMMONSCLI:$GUAVA:$GSON:$JODA:$LOG4J2:$RFA:$RFAVALUEADD:$UPA:$UPAVALUEADD:$ZMQ \
 	-Dlog4j.configurationFile=log4j2.xml \
 	$ENABLEASSERTIONS \
 	$ENABLEDISRUPTOR \

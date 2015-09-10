@@ -22,7 +22,7 @@ public class ItemStream {
 	private ImmutableSortedSet<Integer> view_by_fid;
 
 /* Subscription handle which is valid from login success to login close. */
-	private Handle item_handle;
+	public int token;
 /* Pending subscription handle as part of RSSL batch request */
 	private Handle batch_handle;
 
@@ -32,7 +32,6 @@ public class ItemStream {
 /* Performance counters */
 
 	public ItemStream (ItemStreamDispatcher dispatcher) {
-		this.clearItemHandle();
 		this.clearBatchHandle();
 		this.reference_count = 1;
 		this.dispatcher = dispatcher;
@@ -76,22 +75,6 @@ public class ItemStream {
 
 	public boolean hasViewByFid() {
 		return null != this.getViewByFid();
-	}
-
-	public Handle getItemHandle() {
-		return this.item_handle;
-	}
-
-	public boolean hasItemHandle() {
-		return null != this.getItemHandle();
-	}
-
-	public void setItemHandle (Handle item_handle) {
-		this.item_handle = item_handle;
-	}
-
-	public void clearItemHandle() {
-		this.setItemHandle (null);
 	}
 
 	public Handle getBatchHandle() {

@@ -56,6 +56,9 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 /* RFA context. */
 	private Rfa rfa;
 
+/* UPA context. */
+	private Upa upa;
+
 /* RFA asynchronous event queue. */
 	private EventQueue event_queue;
 
@@ -76,7 +79,6 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private static Logger RFA_LOG = LogManager.getLogger ("com.reuters.rfa");
 
 	private static final String RSSL_PROTOCOL		= "rssl";
-	private static final String SSLED_PROTOCOL		= "ssled";
 
 	private static final String SERVER_LIST_PARAM		= "server-list";
 	private static final String APPLICATION_ID_PARAM	= "application-id";
@@ -216,10 +218,10 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		return values == null ? null : Collections.unmodifiableList (values);
 	}
 
-	private void init (CommandLine line, Options options) throws Exception {
+	private boolean Initialize (CommandLine line, Options options) throws Exception {
 		if (line.hasOption (HELP_OPTION)) {
 			printHelp (options);
-			return;
+			return true;
 		}
 
 /* Configuration. */
@@ -313,29 +315,17 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.dispatcher.bind ("inproc://rfa");
 		this.abort_sock.connect ("inproc://rfa");
 
-/* RFA Logging. */
-// Remove existing handlers attached to j.u.l root logger
-		SLF4JBridgeHandler.removeHandlersForRootLogger();
-// add SLF4JBridgeHandler to j.u.l's root logger
-		SLF4JBridgeHandler.install();
-
-		if (RFA_LOG.isDebugEnabled()) {
-			java.util.logging.Logger rfa_logger = java.util.logging.Logger.getLogger ("com.reuters.rfa");
-			rfa_logger.setLevel (java.util.logging.Level.FINE);
+/* UPA Context. */
+		this.upa = new Upa (this.config);
+		if (!this.upa.Initialize()) {
+			return false;
 		}
 
-/* RFA Context. */
-		this.rfa = new Rfa (this.config);
-		this.rfa.init();
-
-/* RFA asynchronous event queue. */
-		this.event_queue = EventQueue.create (this.config.getEventQueueName());
-
-/* RFA consumer */
-		this.analytic_consumer = new AnalyticConsumer (this.config.getSession(),
-					this.rfa,
-					this.event_queue);
-		this.analytic_consumer.init();
+/* UPA consumer */
+		this.analytic_consumer = new AnalyticConsumer (this.config.getSession(), this.upa);
+		if (!this.analytic_consumer.Initialize()) {
+			return false;
+		}
 
 /* HTTP server */
 		this.http_server = HttpServer.create (new InetSocketAddress (this.config.getHostAndPort().getPort()), 0);
@@ -348,6 +338,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 //		this.http_server.setExecutor (java.util.concurrent.Executors.newSingleThreadExecutor());
 /* Default sensible multi-threaded option */
 		this.http_server.setExecutor (java.util.concurrent.Executors.newCachedThreadPool());
+
+		return true;
 	}
 
 	private class MyHandler implements HttpHandler {
@@ -468,15 +460,16 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 	}
 
 	private void run (CommandLine line, Options options) throws Exception {
-		this.init (line, options);
-		Thread shutdown_hook = new ShutdownThread (this);
-		Runtime.getRuntime().addShutdownHook (shutdown_hook);
-		LOG.trace ("Shutdown hook installed.");
-		this.mainloop();
-		LOG.trace ("Shutdown in progress.");
+		if (this.Initialize (line, options)) {
+			Thread shutdown_hook = new ShutdownThread (this);
+			Runtime.getRuntime().addShutdownHook (shutdown_hook);
+			LOG.trace ("Shutdown hook installed.");
+			this.mainloop();
+			LOG.trace ("Shutdown in progress.");
 /* Cannot remove hook if shutdown is in progress. */
-//		Runtime.getRuntime().removeShutdownHook (shutdown_hook);
-//		LOG.trace ("Removed shutdown hook.");
+//			Runtime.getRuntime().removeShutdownHook (shutdown_hook);
+//			LOG.trace ("Removed shutdown hook.");
+		}
 		this.clear();
 		this.is_shutdown = true;
 	}
@@ -520,51 +513,9 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 	}
 
 	private void mainloop() {
-		RfaDispatcher dispatcher = new RfaDispatcher (this.zmq_context);
-		this.event_queue.registerNotificationClient (dispatcher, null);
-		try {
-/* drain queue of pending events before client registration */
-			this.drainqueue();
-			this.http_server.start();
-			LOG.info ("Listening on http://{}/", this.http_server.getAddress());
-/* on demand edge triggered dispatch */
-			while (this.event_queue.isActive()) {
-				LOG.trace ("Waiting ...");
-				final String identity = this.dispatcher.recvStr();
-				this.dispatcher.recv (0);		// envelope delimiter
-				String msg = this.dispatcher.recvStr();	// response
-				switch (msg) {
-				case "http":
-					LOG.trace ("http: from {}", identity);
-					try {
-						final URI request = new URI (this.dispatcher.recvStr());
-						this.handler (request, identity);
-					} catch (Exception e) {
-						LOG.trace ("500 Internal Error.");
-						this.dispatcher.sendMore (identity);
-						this.dispatcher.sendMore ("");
-						this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_INTERNAL_ERROR));
-						this.dispatcher.send (Throwables.getStackTraceAsString (e));
-					}
-					break;
-				default:
-					if (this.event_queue.isActive())
-						this.event_queue.dispatch (Dispatchable.NO_WAIT);
-					break;
-				}
-			}
-		} catch (DispatchException e) {
-			LOG.error ("DispatchException: {}", Throwables.getStackTraceAsString (e));
-		} catch (Throwable t) {
-			LOG.catching (t);
-		} finally {
-			this.http_server.stop (0 /* seconds */);
-			if (!this.event_queue.isActive()) this.event_queue.deactivate();
-			this.drainqueue();
-		}
+		LOG.trace ("Waiting ...");
+		this.analytic_consumer.Run();
 		LOG.trace ("Mainloop deactivated.");
-		this.event_queue.unregisterNotificationClient (dispatcher);
-		dispatcher.reset();
 	}
 
 	final static Duration ONE_SECOND = Duration.standardSeconds (1);
@@ -862,32 +813,16 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			this.http_server = null;
 		}
 
-/* Prevent new events being generated whilst shutting down. */
-		if (null != this.event_queue && this.event_queue.isActive()) {
-			LOG.trace ("Deactivating EventQueue.");
-			this.event_queue.deactivate();
-/* notify mainloop */
-			this.abort_sock.sendMore ("");
-			this.abort_sock.send ("abort");
-			this.drainqueue();
-		}
-
 		if (null != this.analytic_consumer) {
 			LOG.trace ("Closing Consumer.");
-			this.analytic_consumer.clear();
+			this.analytic_consumer.Close();
 			this.analytic_consumer = null;
 		}
 
-		if (null != this.event_queue) {
-			LOG.trace ("Closing EventQueue.");
-			this.event_queue.destroy();
-			this.event_queue = null;
-		}
-
-		if (null != this.rfa) {
-			LOG.trace ("Closing RFA.");
-			this.rfa.clear();
-			this.rfa = null;
+		if (null != this.upa) {
+			LOG.trace ("Closing UPA.");
+			this.upa.clear();
+			this.upa = null;
 		}
 
 		if (null != this.abort_sock) {

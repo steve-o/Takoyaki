@@ -4,11 +4,15 @@
 package com.thomsonreuters.Takoyaki;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.*;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 // Java 8
 import java.time.Instant;
 import java.time.temporal.ChronoField;
@@ -92,7 +96,7 @@ import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryReque
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryRequestAttrib;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryResponse;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryResponsePayload;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.Service;
+//import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.Service;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLogin;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLoginRequest;
 import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLoginRequestAttrib;
@@ -102,19 +106,82 @@ import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginRequest;
 import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginRequestAttrib;
 import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginResponse;
 import com.thomsonreuters.rfa.valueadd.domainrep.ResponseStatus;
+import com.thomsonreuters.upa.codec.Buffer;
+import com.thomsonreuters.upa.codec.Codec;
+import com.thomsonreuters.upa.codec.CodecFactory;
+import com.thomsonreuters.upa.codec.CodecReturnCodes;
+import com.thomsonreuters.upa.codec.DataDictionary;
+import com.thomsonreuters.upa.codec.DataStates;
+import com.thomsonreuters.upa.codec.DataTypes;
+import com.thomsonreuters.upa.codec.DecodeIterator;
+import com.thomsonreuters.upa.codec.ElementEntry;
+import com.thomsonreuters.upa.codec.ElementList;
+import com.thomsonreuters.upa.codec.ElementListFlags;
+import com.thomsonreuters.upa.codec.EncodeIterator;
+import com.thomsonreuters.upa.codec.Msg;
+import com.thomsonreuters.upa.codec.MsgClasses;
+import com.thomsonreuters.upa.codec.MsgKeyFlags;
+import com.thomsonreuters.upa.codec.RequestMsg;
+import com.thomsonreuters.upa.codec.RequestMsgFlags;
+import com.thomsonreuters.upa.codec.State;
+import com.thomsonreuters.upa.codec.StreamStates;
+import com.thomsonreuters.upa.rdm.Dictionary;
+import com.thomsonreuters.upa.rdm.Directory;
+import com.thomsonreuters.upa.rdm.DomainTypes;
+import com.thomsonreuters.upa.rdm.ElementNames;
+import com.thomsonreuters.upa.rdm.InstrumentNameTypes;
+import com.thomsonreuters.upa.rdm.Login;
+import com.thomsonreuters.upa.transport.Channel;
+import com.thomsonreuters.upa.transport.ChannelInfo;
+import com.thomsonreuters.upa.transport.ChannelState;
+import com.thomsonreuters.upa.transport.ComponentInfo;
+import com.thomsonreuters.upa.transport.CompressionTypes;
+import com.thomsonreuters.upa.transport.ConnectOptions;
+import com.thomsonreuters.upa.transport.ConnectionTypes;
+import com.thomsonreuters.upa.transport.InProgFlags;
+import com.thomsonreuters.upa.transport.InProgInfo;
+import com.thomsonreuters.upa.transport.ReadArgs;
+import com.thomsonreuters.upa.transport.Transport;
+import com.thomsonreuters.upa.transport.TransportBuffer;
+import com.thomsonreuters.upa.transport.TransportFactory;
+import com.thomsonreuters.upa.transport.TransportReturnCodes;
+import com.thomsonreuters.upa.transport.WriteArgs;
+import com.thomsonreuters.upa.transport.WriteFlags;
+import com.thomsonreuters.upa.transport.WritePriorities;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsg;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsgFactory;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsgType;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryRefresh;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryRefreshFlags;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsg;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsgFactory;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsgType;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryRefresh;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryUpdate;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.Service;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginAttribFlags;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsg;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsgFactory;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsgType;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginRefresh;
+import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginStatus;
 
 public class AnalyticConsumer implements Client {
-	private static Logger LOG = LogManager.getLogger (Consumer.class.getName());
+	private static Logger LOG = LogManager.getLogger (AnalyticConsumer.class.getName());
 	private static final Marker SHOGAKOTTO_MARKER = MarkerManager.getMarker ("SHOGAKOTTO");
 	private static final String LINE_SEPARATOR = System.getProperty ("line.separator");
 
 	private SessionConfig config;
 
-/* RFA context. */
-	private Rfa rfa;
+/* UPA context. */
+	private Upa upa;
+/* This flag is set to false when Run should return. */
+	private boolean keep_running;
 
-/* RFA asynchronous event queue. */
-	private EventQueue event_queue;
+/* Active UPA connection. */
+	private Channel connection;
+/* unique id per connection. */
+	private String prefix;
 
 /* RFA session defines one or more connections for horizontal scaling. */
 	private Session session;
@@ -130,56 +197,69 @@ public class AnalyticConsumer implements Client {
 	private Gson gson;
 	private StringBuilder sb;
 
+/* Pending messages to flush. */
+	int pending_count;
 /* Data dictionaries. */
-	private RDMDictionaryCache rdm_dictionary;
+	private DataDictionary rdm_dictionary;
+	private Map<String, Integer> dictionary_tokens;
 
-/* Directory */
-	private Map<String, ItemStream> directory;
+/* Watchlist of all items. */
+	private List<ItemStream> directory;
+	private Map<Integer, ItemStream> tokens;
 
-/* RFA Item event consumer */
-	private Handle error_handle;
-	private Handle login_handle;
-	private Handle directory_handle;
+/* Service name to id map  */
+	private ImmutableMap<String, Integer> service_map;
 
-/* Resubscription management via timer */
-	private Handle resubscription_handle;
-	private SubscriptionManager subscription_manager;
+/* incrementing unique id for streams */
+	int token;
+	int directory_token;
+	int dictionary_token;
+	int login_token;	/* should always be 1 */
+/* RSSL keepalive state. */
+	Instant next_ping;
+	Instant next_pong;
+	int ping_interval;	/* seconds */
 
-	private class FlaggedHandle {
-		private Handle handle;
-		private boolean flag;
+	private ImmutableMap<String, Integer> appendix_a;
 
-		public FlaggedHandle (Handle handle) {
-			this.handle = handle;
-			this.flag = false;
-		}
+	private Instant last_activity;
 
-		public Handle getHandle() {
-			return this.handle;
-		}
-
-		public boolean isFlagged() {
-			return this.flag;
-		}
-
-		public void setFlag() {
-			this.flag = true;
-		}
+	private Instant NextPing() {
+		return this.next_ping;
 	}
 
-	private Map<String, FlaggedHandle> dictionary_handle;
-	private ImmutableMap<String, Integer> appendix_a;
+	private Instant NextPong() {
+		return this.next_pong;
+	}
+
+	private void SetNextPing (Instant time) {
+		this.next_ping = time;
+	}
+
+	private void SetNextPong (Instant time) {
+		this.next_pong = time;
+	}
+
+	private void IncrementPendingCount() {
+		this.pending_count++;
+	}
+
+	private void ClearPendingCount() {
+		this.pending_count = 0;
+	}
+
+	private int GetPendingCount() {
+		return this.pending_count;
+	}
 
 	private class App implements Client {
 /* ERROR: modifier 'static' is only allowed in constant variable declarations */
 		private Logger LOG = LogManager.getLogger (App.class.getName());
 
-		private EventQueue event_queue;
 		private OMMConsumer omm_consumer;
 		private OMMPool omm_pool;
 		private OMMEncoder omm_encoder;
 		private OMMEncoder omm_encoder2;
-		private Handle login_handle;		/* to infrastructure */
 		private String service_name;
 		private String app_name;
 		private String uuid;
@@ -191,13 +271,11 @@ public class AnalyticConsumer implements Client {
 		private ResponseStatus closed_response_status;
 		private Handle private_stream;
 
-		public App (EventQueue event_queue, OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, Handle login_handle, String service_name, String app_name, String uuid, String password) {
-			this.event_queue = event_queue;
+		public App (OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, String service_name, String app_name, String uuid, String password) {
 			this.omm_consumer = omm_consumer;
 			this.omm_pool = omm_pool;
 			this.omm_encoder = omm_encoder;
 			this.omm_encoder2 = omm_encoder2;
-			this.login_handle = login_handle;
 			this.service_name = service_name;
 			this.app_name = app_name;
 			this.uuid = uuid;
@@ -217,7 +295,7 @@ public class AnalyticConsumer implements Client {
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
 msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
-			msg.setAssociatedMetaInfo (this.login_handle);
+//			msg.setAssociatedMetaInfo (this.login_handle);
 			msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
 			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
 			attribInfo.setServiceName (this.service_name);
@@ -243,7 +321,7 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
 				GenericOMMParser.parseMsg (msg, ps);
 				LOG.debug ("Private stream request:{}{}", LINE_SEPARATOR, baos.toString());
 			}
-			this.private_stream = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
+//			this.private_stream = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
 			this.omm_pool.releaseMsg (msg);
 		}
 
@@ -264,11 +342,11 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
 		private void registerRetryTimer (AnalyticStream stream, int retry_timer_ms) {
 			final TimerIntSpec timer = new TimerIntSpec();
 			timer.setDelay (retry_timer_ms);
-			final Handle timer_handle = this.omm_consumer.registerClient (this.event_queue, timer, this, stream);
-			if (timer_handle.isActive())
-				stream.setTimerHandle (timer_handle);
-			else
-				LOG.error ("Timer handle for query \"{}\" closed on registration.", stream.getQuery());
+//			final Handle timer_handle = this.omm_consumer.registerClient (this.event_queue, timer, this, stream);
+//			if (timer_handle.isActive())
+//				stream.setTimerHandle (timer_handle);
+//			else
+//				LOG.error ("Timer handle for query \"{}\" closed on registration.", stream.getQuery());
 		}
 
 		public void destroyItemStream (AnalyticStream stream) {
@@ -683,7 +761,8 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 						continue;
 					}
 					final OMMFieldEntry fe = (OMMFieldEntry)entry;
-					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
+final FidDef fiddef = null;
+//					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
 					switch (fe.getFieldId()) {
 					case 9217: // ITVL_DATE
 						if (OMMTypes.DATE == fiddef.getOMMType()) {
@@ -756,7 +835,7 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 							break;
 
 						case OMMTypes.ENUM:
-							stream.addResult (row, fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
+//							stream.addResult (row, fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
 							break;
 
 						case OMMTypes.RMTES_STRING:
@@ -990,7 +1069,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				while (it.hasNext()) {
 					final OMMFieldEntry field_entry = (OMMFieldEntry)it.next();
 					final short fid = field_entry.getFieldId();
-					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
+final FidDef fid_def = null;
+//					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
 					final OMMData data = field_entry.getData (fid_def.getOMMType());
 					LOG.debug (new StringBuilder()
 						.append (fid_def.getName())
@@ -1009,7 +1089,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				while (it.hasNext()) {
 					final OMMFieldEntry field_entry = (OMMFieldEntry)it.next();
 					final short fid = field_entry.getFieldId();
-					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
+final FidDef fid_def = null;
+//					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
 					final OMMData data = field_entry.getData (fid_def.getOMMType());
 					sb.append (',')
 					  .append ('\"').append (fid_def.getName()).append ("\":");
@@ -1187,6 +1268,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 	private static final boolean DO_NOT_CACHE_ZERO_VALUE	= true;
 	private static final boolean DO_NOT_CACHE_BLANK_VALUE	= true;
 
+	private static final int MAX_MSG_SIZE			= 4096;
 	private static final int OMM_PAYLOAD_SIZE	     	= 5000;
 	private static final int GC_DELAY_MS			= 15000;
 	private static final int RESUBSCRIPTION_MS		= 180000;
@@ -1196,14 +1278,14 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 	private static final String RSSL_PROTOCOL      	 	= "rssl";
 
-	public AnalyticConsumer (SessionConfig config, Rfa rfa, EventQueue event_queue) {
+	public AnalyticConsumer (SessionConfig config, Upa upa) {
 		this.config = config;
-		this.rfa = rfa;
-		this.event_queue = event_queue;
+		this.upa = upa;
 		this.apps = Maps.newLinkedHashMap();
 		this.rwf_major_version = 0;
 		this.rwf_minor_version = 0;
 		this.is_muted = true;
+		this.keep_running = true;
 		this.pending_directory = true;
 		this.pending_dictionary = true;
 
@@ -1215,41 +1297,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 						: DEFAULT_RETRY_LIMIT;
 	}
 
-	private class SubscriptionManager implements Client {
-		private final AnalyticConsumer consumer;
-
-		public SubscriptionManager (AnalyticConsumer consumer) {
-			this.consumer = consumer;
-		}
-
-		@Override
-		public void processEvent (Event event) {
-			LOG.trace (event);
-			switch (event.getType()) {
-			case Event.TIMER_EVENT:
-				this.OnTimerEvent (event);
-				break;
-
-			default:
-				LOG.trace ("Uncaught: {}", event);
-				break;
-			}
-		}
-
-/* All requests are throttled per The Session Layer Package Configuration thus
- * no need to perform additional pacing at the application layer.  Default is
- * to permit 200 outstanding requests at a time.  See throttleEnabled, and
- * throttleType for interval based request batching.
- */
-		private void OnTimerEvent (Event event) {
-			LOG.trace ("Resubscription event ...");
-			if (null != this.consumer) {
-				this.consumer.resubscribe();
-			}
-		}
-	}
-
-	public void init() throws Exception {
+	public boolean Initialize() throws Exception {
 		LOG.trace (this.config);
 
 /* Manual serialisation */
@@ -1261,124 +1309,342 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				.serializeNulls()
 				.create();
 
-/* Configuring the session layer package.
- */
-		LOG.trace ("Acquiring RFA session.");
-		this.session = Session.acquire (this.config.getSessionName());
-
-/* RFA Version Info. The version is only available if an application
- * has acquired a Session (i.e., the Session Layer library is laoded).
- */
-		LOG.debug ("RFA: { \"productVersion\": \"{}\" }", Context.getRFAVersionInfo().getProductVersion());
-
-		if (this.config.getProtocol().equalsIgnoreCase (RSSL_PROTOCOL))
-		{
-/* Initializing an OMM consumer. */
-			LOG.trace ("Creating OMM consumer.");
-			this.omm_consumer = (OMMConsumer)this.session.createEventSource (EventSource.OMM_CONSUMER,
-						this.config.getConsumerName(),
-						false /* complete events */);
-
-/* Registering for Events from an OMM Consumer. */
-			LOG.trace ("Registering OMM error interest.");
-			OMMErrorIntSpec ommErrorIntSpec = new OMMErrorIntSpec();
-			this.error_handle = this.omm_consumer.registerClient (this.event_queue, ommErrorIntSpec, this, null);
-
-/* OMM memory management. */
-			this.omm_pool = OMMPool.create (OMMPool.SINGLE_THREADED);
-			this.omm_encoder = this.omm_pool.acquireEncoder();
-			this.omm_encoder2 = this.omm_pool.acquireEncoder();
-
-			this.rdm_dictionary = new RDMDictionaryCache();
-
-			this.sendLoginRequest();
-			this.sendDirectoryRequest();
-		}
-		else
-		{
-			throw new Exception ("Unsupported transport protocol \"" + this.config.getProtocol() + "\".");
+/* RSSL Version Info. */
+		if (!this.upa.VerifyVersion()) {
+			return false;
 		}
 
-		this.directory = new LinkedHashMap<String, ItemStream>();
-		this.dictionary_handle = new TreeMap<String, FlaggedHandle>();
+		this.directory = new LinkedList<ItemStream>();
+		this.tokens = new LinkedHashMap<Integer, ItemStream>();
+		return true;
+	}
 
-/* Resubsription manager */
-		if (RESUBSCRIPTION_MS > 0) {
-			final TimerIntSpec timer = new TimerIntSpec();
-			timer.setDelay (RESUBSCRIPTION_MS);
-			timer.setRepeating (true);
-			this.subscription_manager = new SubscriptionManager (this);
-			this.resubscription_handle = this.omm_consumer.registerClient (this.event_queue, timer, this.subscription_manager, null);
+	public void Close() {
+	}
+
+/* includes input fds */
+	private Selector selector;
+	private Set<SelectionKey> out_keys;
+
+	public void Run() {
+		LOG.trace ("Run");
+
+// throws IOException for undocumented reasons.
+		try {
+			this.selector = Selector.open();
+LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selectedKeys().size());
+		} catch (IOException e) {
+			LOG.catching (e);
+			this.keep_running = true;
+			return;
+		}
+		this.out_keys = null;
+		final long timeout = 1000 * 100;
+
+		while (true) {
+			boolean did_work = DoWork();
+
+			if (!this.keep_running)
+				break;
+
+			if (did_work)
+				continue;
+
+			try {
+//				final int rc = this.selector.select (timeout /* milliseconds */);
+				final int rc = this.selector.select ();
+LOG.trace ("select -> {}/{}/{} ({})", rc, this.selector.selectedKeys().size(), this.selector.keys().size(), timeout);
+LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
+				if (rc > 0) {
+					this.out_keys = this.selector.selectedKeys();
+				}
+			} catch (Exception e) {
+				LOG.catching (e);
+			}
+		}
+
+		this.keep_running = true;
+	}
+
+	private boolean DoWork() {
+//		LOG.trace ("DoWork");
+		boolean did_work = false;
+
+		this.last_activity = Instant.now();
+
+/* Only check keepalives on timeout */
+
+/* Client connection */
+		if (null == this.connection) {
+			this.Connect();
+			did_work = true;
+		}
+
+		if (null != this.connection && null != this.out_keys) {
+			final Channel c = this.connection;
+			Iterator<SelectionKey> it = this.selector.selectedKeys().iterator();
+			while (it.hasNext()) {
+				final SelectionKey key = it.next();
+				it.remove();
+/* incoming */
+				if (key.isReadable()) {
+					this.OnCanReadWithoutBlocking (c);
+					did_work = true;
+				}
+/* outgoing */
+				if (key.isWritable()) {
+					this.OnCanWriteWithoutBlocking (c);
+					did_work = true;
+				}
+/* connected */
+				if (key.isConnectable()) {
+					this.OnCanConnectWithoutBlocking (c);
+					did_work = true;
+				}
+			}
+/* Keepalive timeout on active session above connection */
+			if (ChannelState.ACTIVE == c.state()) {
+				if (this.last_activity.isAfter (this.NextPing())) {
+					this.Ping (c);
+				}
+				if (this.last_activity.isAfter (this.NextPong())) {
+					LOG.error ("Pong timeout from peer, aborting connection.");
+					this.Abort (c);
+				}
+			}
+/* disconnects */
+		}
+
+		return did_work;
+	}
+
+	public void Quit() {
+		this.keep_running = false;
+	}
+
+	private void Connect() {
+		final ConnectOptions addr = TransportFactory.createConnectOptions();
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		LOG.info ("Initiating new connection.");
+
+		addr.channelReadLocking (false);
+		addr.channelWriteLocking (false);
+		addr.unifiedNetworkInfo().address (this.config.getServers()[0]);
+		addr.unifiedNetworkInfo().serviceName (this.config.hasDefaultPort() ? this.config.getDefaultPort() : "14002");
+		addr.protocolType (Codec.protocolType());
+		addr.majorVersion (Codec.majorVersion());
+		addr.minorVersion (Codec.minorVersion());
+		final Channel c = Transport.connect (addr, rssl_err);
+		if (null == c) {
+			LOG.error ("Transport.connect: { \"errorId\": {}, \"sysError\": {}, \"text\": \"{}\", \"connectionInfo\": {}, \"protocolType\": {}, \"majorversion\": {}, \"minorVersion\": {} }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+				addr.unifiedNetworkInfo(), addr.protocolType(), addr.majorVersion(), addr.minorVersion());
+		} else {
+			this.connection = c;
+/* Set logger ID */
+			this.prefix = Integer.toHexString (c.hashCode());
+
+/* Wait for session */
+			try {
+				c.selectableChannel().register (this.selector, SelectionKey.OP_CONNECT , c);
+			} catch (ClosedChannelException e) {
+/* leave error handling to Channel wrapper */
+				LOG.catching (e);
+			}
+
+			LOG.info ("RSSL socket created: { \"connectionType\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {}, \"pingTimeout\": {}, \"protocolType\": {}, \"socketId\": {}, \"state\": \"{}\" }",
+				ConnectionTypes.toString (c.connectionType()), c.majorVersion(), c.minorVersion(), c.pingTimeout(), c.protocolType(), c.selectableChannel().hashCode(), ChannelState.toString (c.state()));
 		}
 	}
 
-	public void clear() {
-		if (null != this.resubscription_handle) {
-			this.resubscription_handle = null;
+	private void OnCanConnectWithoutBlocking (Channel c) {
+		LOG.trace ("OnCanConnectWithoutBlocking");
+		switch (c.state()) {
+		case ChannelState.CLOSED:
+			LOG.info ("socket state is closed.");
+			this.Abort (c);
+			break;
+		case ChannelState.INACTIVE:
+			LOG.info ("socket state is inactive.");
+			break;
+		case ChannelState.INITIALIZING:
+			LOG.info ("socket state is initializing.");
+			try {
+				c.selectableChannel().keyFor (selector).interestOps (SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+			} catch (Exception e) {
+				LOG.catching (e);
+			}
+			this.OnInitializingState (c);
+			break;
+		default:
+			LOG.info ("unhandled socket state.");
+			break;
 		}
-		if (null != this.rdm_dictionary)
-			this.rdm_dictionary = null;
-		if (null != this.omm_encoder)
-			this.omm_encoder = null;
-		if (null != this.omm_encoder2)
-			this.omm_encoder2 = null;
-		if (null != this.omm_pool) {
-			LOG.trace ("Closing OMMPool.");
-			this.omm_pool.destroy();
-			this.omm_pool = null;
+	}
+
+	private void OnCanReadWithoutBlocking (Channel c) {
+		LOG.trace ("OnCanReadWithoutBlocking");
+		switch (c.state()) {
+		case ChannelState.CLOSED:
+			LOG.info ("socket state is closed.");
+/* Raise internal exception flags to remove socket */
+			this.Abort (c);
+			break;
+		case ChannelState.INACTIVE:
+			LOG.info ("socket state is inactive.");
+			break;
+		case ChannelState.INITIALIZING:
+			LOG.info ("socket state is initializing.");
+			break;
+		case ChannelState.ACTIVE:
+			this.OnActiveReadState (c);
+			break;
+		default:
+			LOG.error ("socket state is unknown.");
+			break;
 		}
-		if (null != this.omm_consumer) {
-			LOG.trace ("Closing OMMConsumer.");
-/* 8.2.11 Shutting Down an Application
- * an application may just destroy Event
- * Source, in which case the closing of the streams is handled by the RFA.
- */
-			if (UNSUBSCRIBE_ON_SHUTDOWN) {
-/* 9.2.5.3 Batch Close
- * The consumer application
- * builds a List of Handles of the event streams to close and calls OMMConsumer.unregisterClient().
- */
-				if (null != this.directory && !this.directory.isEmpty()) {
-					List<Handle> item_handles = new ArrayList<Handle> (this.directory.size());
-					for (ItemStream item_stream : this.directory.values()) {
-						if (item_stream.hasItemHandle())
-							item_handles.add (item_stream.getItemHandle());
-					}
-					this.omm_consumer.unregisterClient (item_handles, null);
-					this.directory.clear();
-				}
-				if (null != this.dictionary_handle && !this.dictionary_handle.isEmpty()) {
-					for (FlaggedHandle flagged_handle : this.dictionary_handle.values()) {
-						this.omm_consumer.unregisterClient (flagged_handle.getHandle());
-					}
-					this.dictionary_handle.clear();
-				}
-				if (null != this.directory_handle) {
-					this.omm_consumer.unregisterClient (this.directory_handle);
-					this.directory_handle = null;
-				}
-				if (null != this.login_handle) {
-					this.omm_consumer.unregisterClient (this.login_handle);
-					this.login_handle = null;
+	}
+
+	private void OnInitializingState (Channel c) {
+		final InProgInfo state = TransportFactory.createInProgInfo();
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		final int rc = c.init (state, rssl_err);
+		switch (rc) {
+		case TransportReturnCodes.CHAN_INIT_IN_PROGRESS:
+			if (InProgFlags.SCKT_CHNL_CHANGE == (state.flags() & InProgFlags.SCKT_CHNL_CHANGE)) {
+				LOG.info ("RSSL protocol downgrade, reconnected.");
+				state.oldSelectableChannel().keyFor (this.selector).cancel();
+				try {
+					c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+				} catch (ClosedChannelException e) {
+					LOG.catching (e);
 				}
 			} else {
-				if (null != this.directory && !this.directory.isEmpty())
-					this.directory.clear();
-				if (null != this.dictionary_handle && !this.dictionary_handle.isEmpty())
-					this.dictionary_handle.clear();
-				if (null != this.directory_handle)
-					this.directory_handle = null;
-				if (null != this.login_handle)
-					this.login_handle = null;
+				LOG.info ("RSSL connection in progress.");
 			}
-			this.omm_consumer.destroy();
-			this.omm_consumer = null;
+			break;
+		case TransportReturnCodes.SUCCESS:
+			this.OnActiveSession (c);
+			try {
+				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+			} catch (ClosedChannelException e) {
+				LOG.catching (e);
+			}
+			break;
+		default:
+			LOG.error ("Channel.init: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			break;
 		}
-		if (null != this.session) {
-			LOG.trace ("Closing RFA Session.");
-			this.session.release();
-			this.session = null;
+	}
+
+	private void OnCanWriteWithoutBlocking (Channel c) {
+		LOG.trace ("OnCanWriteWithoutBlocking");
+		switch (c.state()) {
+		case ChannelState.CLOSED:
+			LOG.info ("socket state is closed.");
+/* Raise internal exception flags to remove socket */
+			this.Abort (c);
+			break;
+		case ChannelState.INACTIVE:
+			LOG.info ("socket state is inactive.");
+			break;
+		case ChannelState.INITIALIZING:
+			LOG.info ("socket state is initializing.");
+			this.OnInitializingState (c);
+			break;
+		case ChannelState.ACTIVE:
+			this.OnActiveWriteState (c);
+			break;
+		default:
+			LOG.error ("socket state is unknown.");
+			break;
 		}
+	}
+
+	private void OnActiveWriteState (Channel c) {
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		LOG.trace ("rsslFlush");
+		final int rc = c.flush (rssl_err);
+		if (TransportReturnCodes.SUCCESS == rc) {
+			final SelectionKey key = c.selectableChannel().keyFor (selector);
+			key.interestOps (key.interestOps() & ~SelectionKey.OP_WRITE);
+			this.ClearPendingCount();
+			this.SetNextPing (this.last_activity.plusSeconds (this.ping_interval));
+		} else if (rc > 0) {
+			LOG.info ("{} bytes pending.", rc);
+		} else {
+			LOG.error ("Channel.flush: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		}
+	}
+
+	private void Abort (Channel c) {
+		c.selectableChannel().keyFor (selector).cancel();
+		try {
+			c.selectableChannel().close();
+		} catch (IOException e) {
+			LOG.catching (e);
+		}
+	}
+
+	private void Close (Channel c) {
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		LOG.info ("Closing RSSL connection.");
+		final int rc = c.close (rssl_err);
+		if (TransportReturnCodes.SUCCESS != rc) {
+			LOG.warn ("Channel.close: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		}
+	}
+
+	private boolean OnActiveSession (Channel c) {
+		final ChannelInfo info = TransportFactory.createChannelInfo();
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		this.last_activity = Instant.now();
+
+/* Relog negotiated state. */
+		LOG.info ("RSSL negotiated state: { \"connectionType\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {}, \"pingTimeout\": {}, \"protocolType\": \"{}\", \"socketId\": {}, \"state\": \"{}\" }",
+			ConnectionTypes.toString (c.connectionType()), c.majorVersion(), c.minorVersion(), c.pingTimeout(), c.protocolType(), c.selectableChannel(), ChannelState.toString (c.state()));
+
+/* Store negotiated Reuters Wire Format version information. */
+		final int rc = c.info (info, rssl_err);
+		if (TransportReturnCodes.SUCCESS != rc) {
+			LOG.error ("Channel.info: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			return false;
+		}
+
+/* Log connected infrastructure. */
+		final StringBuilder components = new StringBuilder ("[ ");
+		final Iterator<ComponentInfo> it = info.componentInfo().iterator();
+		while (it.hasNext()) {
+			final ComponentInfo component = it.next();
+			components.append ("{ ")
+				.append ("\"componentVersion\": \"").append (component.componentVersion()).append ("\"")
+				.append (" }");
+			if (it.hasNext())
+				components.append (", ");
+		}
+		components.append (" ]");
+
+		LOG.info ("channelInfo: { \"clientToServerPings\": {}, \"componentInfo\": {}, \"compressionThreshold\": {}, \"compressionType\": \"{}\", \"guaranteedOutputBuffers\": {}, \"maxFragmentSize\": {}, \"maxOutputBuffers\": {}, \"numInputBuffers\": {}, \"pingTimeout\": {}, \"priorityFlushStrategy\": \"{}\", \"serverToClientPings\": \"{}\", \"sysRecvBufSize\": {}, \"sysSendBufSize\": {} }",
+			info.clientToServerPings(), components.toString(), info.compressionThreshold(), info.compressionType(), CompressionTypes.toString (info.compressionType()), info.guaranteedOutputBuffers(), info.maxFragmentSize(), info.maxOutputBuffers(), info.numInputBuffers(), info.pingTimeout(), info.priorityFlushStrategy(), info.serverToClientPings(), info.sysRecvBufSize(), info.sysSendBufSize());
+/* First token aka stream id */
+		this.token = 1;
+/* Derive expected RSSL ping interval from negotiated timeout. */
+		this.ping_interval = c.pingTimeout() / 3;
+/* Schedule first RSSL ping. */
+		this.SetNextPing (this.last_activity.plusSeconds (this.ping_interval));
+/* Treat connect as first RSSL pong. */
+		this.SetNextPong (this.last_activity.plusSeconds (c.pingTimeout()));
+/* Reset RDM data dictionary and wait to request from upstream. */
+		return this.SendLoginRequest (c);
 	}
 
 /* Create an item stream for a given symbol name.  The Item Stream maintains
@@ -1399,9 +1665,9 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		item_stream.setServiceName (instrument.getService());
 
 		if (!this.pending_dictionary) {
-			this.sendItemRequest (item_stream);
+			this.sendItemRequest (this.connection, item_stream);
 		}
-		this.directory.put (key, item_stream);
+		this.directory.add (item_stream);
 		LOG.trace ("Directory size: {}", this.directory.size());
 	}
 
@@ -1416,7 +1682,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 	private void destroyItemStream (ItemStream item_stream, String key) {
 		LOG.trace ("Destroying item stream for RIC \"{}\" on service \"{}\".", item_stream.getItemName(), item_stream.getServiceName());
-		this.cancelItemRequest (item_stream);
+//		this.cancelItemRequest (item_stream);
 		this.directory.remove (key);
 		LOG.trace ("Directory size: {}", this.directory.size());
 	}
@@ -1437,11 +1703,9 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 /* lazy app private stream creation */
 		App app = this.apps.get (analytic.getApp());
 		if (null == app) {
-			app = new App (this.event_queue,
-					this.omm_consumer,
+			app = new App ( this.omm_consumer,
 					this.omm_pool,
 					this.omm_encoder, this.omm_encoder2,
-					this.login_handle,
 					analytic.getService(),
 					analytic.getApp(),
 					this.config.hasUuid() ? this.config.getUuid() : "",
@@ -1493,8 +1757,22 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		return ImmutableMap.copyOf (map);
 	}
 
-	public void resubscribe() {
-		LOG.trace ("resubscribe");
+	public boolean Resubscribe (Channel c) {
+		if (this.is_muted) {
+			LOG.debug ("Cancelling item resubscription due to pending session.");
+			return true;
+		}
+
+		for (ItemStream item_stream : this.directory) {
+			if (-1 == item_stream.token) {
+				this.sendItemRequest (c, item_stream);
+			}
+		}
+
+		return true;
+	}
+
+	public void Resubscribe () {
 /* Cannot decode responses so do not allow wire subscriptions until dictionary is present */
 		if (this.pending_dictionary)
 			return;
@@ -1511,39 +1789,504 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		}
 
 /* item streams */
-		for (ItemStream item_stream : this.directory.values()) {
-			if (!item_stream.hasItemHandle()) {
-				this.sendItemRequest (item_stream);
+		for (ItemStream item_stream : this.directory) {
+			if (-1 == item_stream.token) {
+				this.sendItemRequest (this.connection, item_stream);
 			}
 		}
 	}
 
-	private void sendItemRequest (ItemStream item_stream) {
-		LOG.trace ("Sending market price request.");
-		OMMMsg msg = this.omm_pool.acquireMsg();
-		msg.setMsgType (OMMMsg.MsgType.REQUEST);
-		msg.setMsgModelType (RDMMsgTypes.MARKET_PRICE);
-		msg.setAssociatedMetaInfo (this.login_handle);
-		msg.setIndicationFlags (OMMMsg.Indication.REFRESH);
-		msg.setAttribInfo (item_stream.getServiceName(), item_stream.getItemName(), RDMInstrument.NameType.RIC);
+	private void OnActiveReadState (Channel c) {
+		final ReadArgs read_args = TransportFactory.createReadArgs();
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
 
-		LOG.trace ("Registering OMM item interest for MMT_MARKET_PRICE/{}/{}", item_stream.getServiceName(), item_stream.getItemName());
-		OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-		ommItemIntSpec.setMsg (msg);
-		item_stream.setItemHandle (this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, item_stream));
-		this.omm_pool.releaseMsg (msg);
+		final TransportBuffer buf = c.read (read_args, rssl_err);
+		final int rc = read_args.readRetVal();
+		if (rc > 0) {
+			LOG.info ("Channel.read: { \"pendingBytes\": {}, \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				rc,
+				read_args.bytesRead(), read_args.uncompressedBytesRead(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		} else {
+			LOG.info ("Channel.read: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				rc, TransportReturnCodes.toString (rc),
+				read_args.bytesRead(), read_args.uncompressedBytesRead(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		}
+
+		if (TransportReturnCodes.CONGESTION_DETECTED == rc
+			|| TransportReturnCodes.SLOW_READER == rc
+			|| TransportReturnCodes.PACKET_GAP_DETECTED == rc)
+		{
+			if (ChannelState.CLOSED != c.state()) {
+				LOG.warn ("Channel.read: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			}
+		}
+		else if (TransportReturnCodes.READ_FD_CHANGE == rc)
+		{
+			LOG.info ("RSSL reconnected.");
+			c.oldSelectableChannel().keyFor (this.selector).cancel();
+			try {
+				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+			} catch (ClosedChannelException e) {
+				LOG.catching (e);
+			}
+		}
+		else if (TransportReturnCodes.READ_PING == rc)
+		{
+			this.SetNextPong (this.last_activity.plusSeconds (c.pingTimeout()));
+			LOG.info ("RSSL pong.");
+		}
+		else if (TransportReturnCodes.FAILURE == rc)
+		{
+			LOG.error ("Channel.read: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		}
+		else 
+		{
+			if (null != buf) {
+				this.OnMsg (c, buf);
+/* Received data equivalent to a heartbeat pong. */
+				this.SetNextPong (this.last_activity.plusSeconds (c.pingTimeout()));
+			}
+			if (rc > 0)
+			{
+/* pending buffer needs flushing out before IO notification can resume */
+				final SelectionKey key = c.selectableChannel().keyFor (selector);
+				key.interestOps (key.interestOps() & SelectionKey.OP_READ);
+			}
+		}
 	}
 
-/* 8.2.11.1 Unregistering Interest In OMM Market Information
- * if the event Stream had already been closed by RFA ... the application does not need to not call
- * unregisterClient().
- */
-	private void cancelItemRequest (ItemStream item_stream) {
-		if (item_stream.hasItemHandle()) {
-			LOG.trace ("Cancelling market price request.");
-			this.omm_consumer.unregisterClient (item_stream.getItemHandle());
+	private boolean sendItemRequest (Channel c, ItemStream item_stream) {
+		LOG.trace ("Sending market price request.");
+		final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+		request.domainType (DomainTypes.MARKET_PRICE);
+/* Set request type. */
+		request.msgClass (MsgClasses.REQUEST);
+		request.flags (RequestMsgFlags.STREAMING);
+/* No view thus no payload. */
+		request.containerType (DataTypes.NO_DATA);
+/* Set the stream token. */
+		request.streamId (this.token);
+
+/* In RFA lingo an attribute object */
+		request.msgKey().nameType (InstrumentNameTypes.RIC);
+		request.msgKey().name().data (item_stream.getItemName());
+		request.msgKey().serviceId (this.service_map.get (item_stream.getServiceName()));
+		request.msgKey().flags (MsgKeyFlags.HAS_NAME_TYPE | MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_SERVICE_ID);
+
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+		if (null == buf) {
+			LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+				MAX_MSG_SIZE);
+			return false;
+		}
+		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+				c.majorVersion(), c.minorVersion());
+			return false;
+		}
+		rc = request.encode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("RequestMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+
+/* Message validation. */
+		if (!request.validateMsg()) {
+			LOG.error ("RequestMsg.validateMsg failed.");
+			return false;
+		}
+
+		if (0 == this.Submit (c, buf)) {
+			return false;
 		} else {
-			LOG.trace ("Market price request closed by RFA.");
+			this.tokens.put (item_stream.token = this.token++, item_stream);
+			return true;
+		}
+	}
+
+	private boolean OnMsg (Channel c, TransportBuffer buf) {
+		final DecodeIterator it = CodecFactory.createDecodeIterator();
+		final Msg msg = CodecFactory.createMsg();
+
+/* Prepare codec */
+		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+
+/* Decode data buffer into RSSL message */
+		rc = msg.decode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("Msg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		} else {
+			if (LOG.isDebugEnabled()) {
+/* Pass through RSSL validation and report exceptions */
+				if (!msg.validateMsg()) {
+					LOG.warn ("Msg.ValidateMsg failed.");
+					this.Abort (c);
+					return false;
+				} else {
+					LOG.debug ("Msg.ValidateMsg success.");
+				}
+				LOG.debug ("{}", msg);
+			}
+			if (!this.OnMsg (c, it, msg))
+				this.Abort (c);
+			return true;
+		}
+	}
+
+/* Returns true if message processed successfully, returns false to abort the connection.
+ */
+	private boolean OnMsg (Channel c, DecodeIterator it, Msg msg) {
+		switch (msg.domainType()) {
+		case DomainTypes.LOGIN:
+			return this.OnLoginResponse (c, it, msg);
+		case DomainTypes.SOURCE:
+			return this.OnDirectory (c, it, msg);
+		case DomainTypes.DICTIONARY:
+			return this.OnDictionary (c, it, msg);
+		default:
+			LOG.warn ("Uncaught message: {}", msg);
+			return true;
+		}
+	}
+
+	private boolean OnLoginResponse (Channel c, DecodeIterator it, Msg msg) {
+		final LoginMsg response = LoginMsgFactory.createMsg();
+
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:	response.rdmMsgType (LoginMsgType.REFRESH); break;
+		case MsgClasses.STATUS:		response.rdmMsgType (LoginMsgType.STATUS); break;
+		case MsgClasses.CLOSE:		response.rdmMsgType (LoginMsgType.CLOSE); break;
+		default: return false;
+		}
+		final int rc = response.decode (it, msg);
+		if (CodecReturnCodes.SUCCESS != rc) {
+/* NB: minimal error detail compared with UPA/C */
+			LOG.warn ("LoginMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc));
+			return false;
+		}
+
+/* extract out stream and data state like RFA */
+		final State state = CodecFactory.createState();
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:
+			state.streamState (((LoginRefresh)response).state().streamState());
+			state.dataState (((LoginRefresh)response).state().dataState());
+			break;
+
+		case MsgClasses.STATUS:
+			state.streamState (((LoginStatus)response).state().streamState());
+			state.dataState (((LoginStatus)response).state().dataState());
+			break;
+
+		case MsgClasses.CLOSE:
+			state.streamState (StreamStates.CLOSED);
+			break;
+
+		case MsgClasses.REQUEST:
+		case MsgClasses.POST:
+		case MsgClasses.ACK:
+		default:
+			LOG.warn ("Uncaught: {}", msg);
+		}
+
+		switch (state.streamState()) {
+		case StreamStates.OPEN:
+			switch (state.dataState()) {
+			case DataStates.OK:
+				return this.OnLoginSuccess (c, response);
+			case DataStates.SUSPECT:
+				return this.OnLoginSuspect (c, response);
+			case DataStates.NO_CHANGE:
+// by-definition, ignore
+				return true;
+			default:
+				LOG.warn ("Uncaught data state: {}", msg);
+				return true;
+			}
+
+		case StreamStates.CLOSED:
+			return this.OnLoginClosed (c, response);
+
+		default:
+			LOG.warn ("Uncaught stream state: {}", msg);
+			return true;
+		}
+	}
+
+	private boolean OnDirectory (Channel c, DecodeIterator it, Msg msg) {
+		final DirectoryMsg response = DirectoryMsgFactory.createMsg();
+
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:	response.rdmMsgType (DirectoryMsgType.REFRESH); break;
+		case MsgClasses.UPDATE:		response.rdmMsgType (DirectoryMsgType.UPDATE); break;
+		case MsgClasses.STATUS:		response.rdmMsgType (DirectoryMsgType.STATUS); break;
+		case MsgClasses.CLOSE:		response.rdmMsgType (DirectoryMsgType.CLOSE); break;
+		default: return false;
+		}
+		final int rc = response.decode (it, msg);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("DirectoryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc));
+			return false;
+		}
+
+		switch (response.rdmMsgType()) {
+		case REFRESH:
+			return this.OnDirectoryRefresh (c, (DirectoryRefresh)response);
+		case UPDATE:
+			return this.OnDirectoryUpdate (c, (DirectoryUpdate)response);
+
+		case CLOSE:
+		case STATUS:
+		default:
+			LOG.warn ("Uncaught directory response message type: {}", msg);
+			return true;
+		}
+	}
+
+	static final String FIELD_DICTIONARY_NAME = "RWFFld";
+	static final String ENUM_TYPE_DICTIONARY_NAME = "RWFEnum";
+
+	private boolean OnDirectoryRefresh (Channel c, DirectoryRefresh response) {
+		LOG.debug ("OnDirectoryRefresh");
+		final ImmutableMap.Builder<String, Integer> builder = ImmutableMap.builder();
+		for (final Service service : response.serviceList()) {
+			builder.put (service.info().serviceName().toString(), service.serviceId());
+		}
+		this.service_map = builder.build();
+
+/* Request dictionary on first directory message. */
+		if (null == this.rdm_dictionary) {
+			if (this.service_map.isEmpty()) {
+				LOG.warn ("Upstream provider has no configured services, unable to request a dictionary.");
+				return true;
+			}
+			final int service_id = response.serviceList().iterator().next().serviceId();
+/* Hard code to RDM dictionary for TREP deployment. */
+			if (!this.SendDictionaryRequest (c, service_id, FIELD_DICTIONARY_NAME))
+				return false;
+			if (!this.SendDictionaryRequest (c, service_id, ENUM_TYPE_DICTIONARY_NAME))
+				return false;
+		}
+
+		return this.Resubscribe (c);
+	}
+
+	private boolean OnDirectoryUpdate (Channel c, DirectoryUpdate response) {
+		LOG.debug ("OnDirectoryUpdate");
+/* new map = old map - update services + updated services */
+		final ImmutableMap.Builder<String, Integer> builder = ImmutableMap.builder();
+		final Set<String> changed = Sets.newTreeSet();
+		for (final Service service : response.serviceList()) {
+			builder.put (service.info().serviceName().toString(), service.serviceId());
+			changed.add (service.info().serviceName().toString());
+		}
+		final Sets.SetView<String> unchanged = Sets.difference (this.service_map.keySet(), changed);
+		for (final String service : unchanged) {
+			builder.put (service, this.service_map.get (service));
+		}
+		this.service_map = builder.build();
+		return this.Resubscribe (c);
+	}
+
+	private boolean OnDictionary (Channel c, DecodeIterator it, Msg msg) {
+		final DictionaryMsg response = DictionaryMsgFactory.createMsg();
+
+		LOG.debug ("OnDictionary");
+
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:	response.rdmMsgType (DictionaryMsgType.REFRESH); break;
+		case MsgClasses.STATUS:		response.rdmMsgType (DictionaryMsgType.STATUS); break;
+		case MsgClasses.CLOSE:		response.rdmMsgType (DictionaryMsgType.CLOSE); break;
+		default: return false;
+		}
+		final int rc = response.decode (it, msg);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("DictionaryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc));
+			return false;
+		}
+
+		switch (response.rdmMsgType()) {
+		case REFRESH:
+			return this.OnDictionaryRefresh (c, it, (DictionaryRefresh)response);
+/* Status can show a new dictionary but is not implemented in TREP-RT infrastructure, so ignore. */
+		case STATUS:
+/* Close should only happen when the infrastructure is in shutdown, defer to closed MMT_LOGIN. */
+		case CLOSE:
+		default:
+			LOG.warn ("Uncaught dictionay response message type: {}", msg);
+			return true;
+		}
+	}
+
+/* Replace any existing RDM dictionary upon a dictionary refresh message.
+ */
+	private boolean OnDictionaryRefresh (Channel c, DecodeIterator it, DictionaryRefresh response) {
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		int rc;
+
+		LOG.debug ("OnDictionaryRefresh");
+
+		switch (response.dictionaryType()) {
+		case Dictionary.Types.FIELD_DEFINITIONS:
+			rc = this.rdm_dictionary.decodeFieldDictionary (it, Dictionary.VerbosityValues.NORMAL, rssl_err);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.info ("DataDictionary.decodeFieldDictionary: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+				return false;
+			}
+			break;
+
+		case Dictionary.Types.ENUM_TABLES:
+			rc = this.rdm_dictionary.decodeEnumTypeDictionary (it, Dictionary.VerbosityValues.NORMAL, rssl_err);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.info ("DataDictionary.decodeEnumTypeDictionary: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+				return false;
+			}
+			break;
+
+/* Ignore unused dictionaries */
+		default:
+			return true;
+		}
+
+		if (0 != (response.flags() & DictionaryRefreshFlags.IS_COMPLETE)) {
+			LOG.info ("Dictionary reception complete.");
+/* Permit new subscriptions. */
+			this.is_muted = false;
+			return this.Resubscribe (c);
+		}
+		return true;
+	}
+
+	private boolean OnLoginSuccess (Channel c, LoginMsg response) {
+		LOG.debug ("OnLoginSuccess");
+/* Log upstream application name, only presented in refresh messages. */
+		switch (response.rdmMsgType()) {
+		case REFRESH:
+			if (0 != (((LoginRefresh)response).attrib().flags() & LoginAttribFlags.HAS_APPLICATION_NAME)) {
+				final LoginRefresh refresh = (LoginRefresh)response;
+				LOG.info ("applicationName: \"{}\"", refresh.attrib().applicationName());
+			}
+		default:
+			break;
+		}
+/* A new connection to TREP infrastructure, request dictionary to discover available services. */
+		return this.SendDirectoryRequest (c);
+	}
+
+	private boolean OnLoginSuspect (Channel c, LoginMsg response) {
+		LOG.debug ("OnLoginSuspect");
+		this.is_muted = true;
+		return true;
+	}
+
+	private boolean OnLoginClosed (Channel c, LoginMsg response) {
+		LOG.debug ("OnLoginClosed");
+		this.is_muted = true;
+		return true;
+	}
+
+	private int Submit (Channel c, TransportBuffer buf) {
+		final WriteArgs write_args = TransportFactory.createWriteArgs();
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		int rc;
+
+		write_args.priority (WritePriorities.LOW);	/* flushing priority */
+/* direct write on clear socket, enqueue when writes are pending */
+		boolean should_write_direct = (0 == (c.selectableChannel().keyFor (this.selector).interestOps() & SelectionKey.OP_WRITE));
+		write_args.flags (should_write_direct ? WriteFlags.DIRECT_SOCKET_WRITE : WriteFlags.NO_FLAGS);
+
+		do {
+			rc = c.write (buf, write_args, rssl_err);
+			if (rc > 0) {
+				LOG.info ("Channel.write: { \"pendingBytes\": {}, \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+					rc,
+					write_args.bytesWritten(), write_args.uncompressedBytesWritten(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			} else {
+				LOG.info ("Channel.write: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+					rc, TransportReturnCodes.toString (rc),
+					write_args.bytesWritten(), write_args.uncompressedBytesWritten(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			}
+
+			if (rc > 0) {
+				this.IncrementPendingCount();
+			}
+			if (rc > 0 
+/* attempted to flush data to the connection but was blocked. */
+				|| TransportReturnCodes.WRITE_FLUSH_FAILED == rc
+/* empty buffer pool: spin wait until buffer is available. */
+				|| TransportReturnCodes.NO_BUFFERS == rc)
+			{
+/* pending output */
+				try {
+					c.selectableChannel().keyFor (this.selector).interestOps (SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+				} catch (Exception e) {
+					LOG.catching (e);
+				}
+				return -1;
+			}
+/* fragmenting the buffer and needs to be called again with the same buffer. */
+		} while (TransportReturnCodes.WRITE_CALL_AGAIN == rc);
+/* sent, no flush required. */
+		if (TransportReturnCodes.SUCCESS != rc) {
+			LOG.info ("Channel.write: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			return 0;
+		}
+/* Sent data equivalent to a ping. */
+		this.SetNextPing (this.last_activity.plusSeconds (this.ping_interval));
+		return 1;
+	}
+
+	private boolean Ping (Channel c) {
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+
+		final int rc = c.ping (rssl_err);
+		if (rc > 0) {
+			LOG.info ("Channel.ping: { \"pendingBytes\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				rc,
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		} else {
+			LOG.info ("Channel.ping: { \"returnCode\": {}, \"enumeration\": \"{}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				rc, TransportReturnCodes.toString (rc),
+				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+		}
+		if (TransportReturnCodes.WRITE_FLUSH_FAILED == rc
+			|| TransportReturnCodes.NO_BUFFERS == rc
+			|| rc > 0)
+		{
+			this.Abort (c);
+			LOG.error ("Channel.ping: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			return false;
+		} else if (TransportReturnCodes.SUCCESS == rc) {	/* sent, no flush required. */
+/* Advance ping expiration only on success. */
+			this.SetNextPing (this.last_activity.plusSeconds (this.ping_interval));
+			return true;
+		} else {
+			LOG.error ("Channel.ping: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			return false;
 		}
 	}
 
@@ -1551,90 +2294,230 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
  * A Login request message is encoded and sent by OMM Consumer and OMM non-
  * interactive provider applications.
  */
-	private void sendLoginRequest() throws UnknownHostException {
+	private boolean SendLoginRequest (Channel c) {
 		LOG.trace ("Sending login request.");
-		RDMLoginRequest request = new RDMLoginRequest();
-		RDMLoginRequestAttrib attribInfo = new RDMLoginRequestAttrib();
+		final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+		request.domainType (DomainTypes.LOGIN);
+/* Set request type. */
+		request.msgClass (MsgClasses.REQUEST);
+		request.flags (RequestMsgFlags.STREAMING);
+/* No payload. */
+		request.containerType (DataTypes.NO_DATA);
+/* Set the login token. */
+		request.streamId (this.login_token = this.token++);
 
-/* RFA/Java only.
- */
-		request.setMessageType (RDMLoginRequest.MessageType.REQUEST);
-		request.setIndicationMask (EnumSet.of (RDMLoginRequest.IndicationMask.REFRESH));
-		attribInfo.setRole (RDMLogin.Role.CONSUMER);
+/* DACS username (required). */
+		request.msgKey().nameType (Login.UserIdTypes.NAME);
+		request.msgKey().name().data (this.config.hasUserName() ?
+						this.config.getUserName()
+						: System.getProperty ("user.name"));
+		request.msgKey().flags (MsgKeyFlags.HAS_NAME_TYPE | MsgKeyFlags.HAS_NAME);
 
-/* DACS username (required).
- */
-		attribInfo.setNameType (RDMLogin.NameType.USER_NAME);
-		attribInfo.setName (this.config.hasUserName() ?
-			this.config.getUserName()
-			: System.getProperty ("user.name"));
+/* Login Request Elements */
+		request.msgKey().attribContainerType (DataTypes.ELEMENT_LIST);
+		request.msgKey().flags (request.msgKey().flags() | MsgKeyFlags.HAS_ATTRIB);
 
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+		if (null == buf) {
+			LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+					MAX_MSG_SIZE);
+			return false;
+		}
+		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					c.majorVersion(), c.minorVersion());
+			return false;
+		}
+		rc = request.encodeInit (it, MAX_MSG_SIZE);
+		if (CodecReturnCodes.ENCODE_MSG_KEY_ATTRIB != rc) {
+			LOG.error ("RequestMsg.encodeInit: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"dataMaxSize\": {} }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc), MAX_MSG_SIZE);
+			return false;
+		}
+
+/* Encode attribute object after message instead of before as per RFA. */
+		final ElementList element_list = CodecFactory.createElementList();
+		final ElementEntry element_entry = CodecFactory.createElementEntry();
+		final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
+		final com.thomsonreuters.upa.codec.UInt rssl_uint = CodecFactory.createUInt();
+		element_list.flags (ElementListFlags.HAS_STANDARD_DATA);
+		rc = element_list.encodeInit (it, null /* element id dictionary */, 0 /* count of elements */);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("RequestMsg.encodeInit: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"flags\": \"HAS_STANDARD_DATA\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+/* Do not permit stale data, item stream should be closed. */
+		final int disallow_suspect_data = 0;
+		rssl_uint.value (disallow_suspect_data);
+		element_entry.dataType (DataTypes.UINT);
+		element_entry.name (ElementNames.ALLOW_SUSPECT_DATA);
+		rc = element_entry.encode (it, rssl_uint);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"allowSuspectData\": {} }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+				element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_uint);
+			return false;
+		}
 /* DACS Application Id (optional).
  * e.g. "256"
  */
-		if (this.config.hasApplicationId())
-			attribInfo.setApplicationId (this.config.getApplicationId());
-
-/* DACS Position name (optional).
- * e.g. "127.0.0.1/net"
- */
-		if (this.config.hasPosition()) {
-			if (!this.config.getPosition().isEmpty())
-				attribInfo.setPosition (this.config.getPosition());
-		} else {
-			this.sb.setLength (0);
-			this.sb .append (InetAddress.getLocalHost().getHostAddress())
-				.append ('/')
-				.append (InetAddress.getLocalHost().getHostName());
-			attribInfo.setPosition (this.sb.toString());
+		if (this.config.hasApplicationId()) {
+			rssl_buffer.data (this.config.getApplicationId());
+			element_entry.dataType (DataTypes.ASCII_STRING);
+			element_entry.name (ElementNames.APPID);
+			rc = element_entry.encode (it, rssl_buffer);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"applicationId\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_buffer);
+				return false;
+			}
 		}
-
 /* Instance Id (optional).
  * e.g. "<Instance Id>"
  */
-		if (this.config.hasInstanceId())
-			attribInfo.setInstanceId (this.config.getInstanceId());
+		if (this.config.hasInstanceId()) {
+			rssl_buffer.data (this.config.getInstanceId());
+			element_entry.dataType (DataTypes.ASCII_STRING);
+			element_entry.name (ElementNames.INST_ID);
+			rc = element_entry.encode (it, rssl_buffer);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"instanceId\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_buffer);
+				return false;
+			}
+		}
+/* DACS Position name (optional).
+ * e.g. "127.0.0.1/net"
+ */
+		String position = null;
+		if (this.config.hasPosition()) {
+			if (!this.config.getPosition().isEmpty())
+				position = this.config.getPosition();
+			else
+				position = "";
+		} else {
+			this.sb.setLength (0);
+			try {
+				this.sb .append (InetAddress.getLocalHost().getHostAddress())
+					.append ('/')
+					.append (InetAddress.getLocalHost().getHostName());
+			} catch (UnknownHostException e) {
+				LOG.catching (e);
+				return false;
+			}
+			position = this.sb.toString();
+		}
+		rssl_buffer.data (position);
+		element_entry.dataType (DataTypes.ASCII_STRING);
+		element_entry.name (ElementNames.POSITION);
+		rc = element_entry.encode (it, rssl_buffer);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"position\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+				element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_buffer);
+			return false;
+		}
+		rc = element_list.encodeComplete (it, true /* commit */);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("ElementList.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+		rc = request.encodeKeyAttribComplete (it, true /* commit */);
+		if (CodecReturnCodes.ENCODE_CONTAINER != rc) {
+			LOG.error ("RequestMsg.encodeKeyAttribComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+		rc = request.encodeComplete (it, true /* commit */);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("RequestMsg.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
 
-		request.setAttrib (attribInfo);
+/* Message validation. */
+		if (!request.validateMsg()) {
+			LOG.error ("RequestMsg.validateMsg failed.");
+			return false;
+		}
 
-		LOG.trace ("Registering OMM item interest for MMT_LOGIN");
-		OMMMsg msg = request.getMsg (this.omm_pool);
-		OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-		ommItemIntSpec.setMsg (msg);
-		this.login_handle = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
-
+		if (0 == this.Submit (c, buf)) {
+			return false;
+		} else {
 /* Reset status */
-		this.pending_directory = true;
+			this.pending_directory = true;
 // Maintain current status of dictionary instead of interrupting existing consumers.
-//		this.pending_dictionary = true;
+//			this.pending_dictionary = true;
+			return true;
+		}
 	}
 
 /* Make a directory request to see if we can ask for a dictionary.
  */
-	private void sendDirectoryRequest() {
+	private boolean SendDirectoryRequest (Channel c) {
 		LOG.trace ("Sending directory request.");
-		RDMDirectoryRequest request = new RDMDirectoryRequest();
-		RDMDirectoryRequestAttrib attribInfo = new RDMDirectoryRequestAttrib();
+		final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+		request.domainType (DomainTypes.SOURCE);
+/* Set request type. */        
+		request.msgClass (MsgClasses.REQUEST);
+		request.flags (RequestMsgFlags.STREAMING);
+/* No payload. */
+		request.containerType (DataTypes.NO_DATA);
+/* Set the directory token. */
+		request.streamId (this.token);	/* login + 1 */
 
-/* RFA/Java only.
- */
-		request.setMessageType (RDMDirectoryRequest.MessageType.REQUEST);
-		request.setIndicationMask (EnumSet.of (RDMDirectoryRequest.IndicationMask.REFRESH));
+/* In RFA lingo an attribute object, TBD: group, load filters. */
+		request.msgKey().filter (Directory.ServiceFilterFlags.INFO	// service names
+					| Directory.ServiceFilterFlags.STATE);	// up or down
+		request.msgKey().flags (MsgKeyFlags.HAS_FILTER);
 
-/* Limit to named service */
-		if (this.config.hasServiceName())
-			attribInfo.setServiceName (this.config.getServiceName());
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+		if (null == buf) {
+			LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+					MAX_MSG_SIZE);
+			return false;
+		}
+		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					c.majorVersion(), c.minorVersion());
+			return false;
+		}
+		rc = request.encode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("RequestMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
 
-/* Request INFO and STATE filters for service names and states */
-		attribInfo.setFilterMask (EnumSet.of (RDMDirectory.FilterMask.INFO, RDMDirectory.FilterMask.STATE));
+/* Message validation. */
+		if (!request.validateMsg()) {
+			LOG.error ("RequestMsg.validateMsg failed.");
+			return false;
+		}
 
-		request.setAttrib (attribInfo);
-
-		LOG.trace ("Registering OMM item interest for MMT_DIRECTORY");
-		OMMMsg msg = request.getMsg (this.omm_pool);
-		OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-		ommItemIntSpec.setMsg (msg);
-		this.directory_handle = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
+		if (0 == this.Submit (c, buf)) {
+			return false;
+		} else {
+/* advance token counter only on success, re-use token on failure. */
+			this.directory_token = this.token++;
+			return true;
+		}
 	}
 
 /* Make a dictionary request.
@@ -1643,29 +2526,64 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
  * Dictionary version checking can be performed by the client after a refresh
  * (Section 2.2) response message of a Dictionary is received.
  */
-	private void sendDictionaryRequest (String service_name, String dictionary_name) {
-		LOG.trace ("Sending dictionary request for \"{}\" from service \"{}\".", dictionary_name, service_name);
-		RDMDictionaryRequest request = new RDMDictionaryRequest();
-		RDMDictionaryRequestAttrib attribInfo = new RDMDictionaryRequestAttrib();
+	private boolean SendDictionaryRequest (Channel c, int service_id, String dictionary_name) {
+		LOG.trace ("Sending dictionary request for \"{}\" from service #{}.", dictionary_name, service_id);
+		final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+		request.domainType (DomainTypes.DICTIONARY);
+/* Set request type. */
+		request.msgClass (MsgClasses.REQUEST);
+		request.flags (RequestMsgFlags.NONE);
+/* No payload. */
+		request.containerType (DataTypes.NO_DATA);
+/* Set the dictionary token. */
+		request.streamId (this.token);
 
-/* RFA/Java only.
- */
-		request.setMessageType (RDMDictionaryRequest.MessageType.REQUEST);
-		request.setIndicationMask (EnumSet.of (RDMDictionaryRequest.IndicationMask.REFRESH));
-
+/* In RFA lingo an attribute object. */
+		request.msgKey().serviceId (service_id);
+		final Buffer rssl_buf = CodecFactory.createBuffer();
+		rssl_buf.data (dictionary_name);
+		request.msgKey().name (rssl_buf);
 // RDMDictionary.Filter.NORMAL=0x7: Provides all information needed for decoding
-		attribInfo.setVerbosity (RDMDictionary.Verbosity.NORMAL);
-		attribInfo.setServiceName (service_name);
-		attribInfo.setDictionaryName (dictionary_name);
+		request.msgKey().filter (Dictionary.VerbosityValues.NORMAL);
+		request.msgKey().flags (MsgKeyFlags.HAS_SERVICE_ID | MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_FILTER);
 
-		request.setAttrib (attribInfo);
+		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+		final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+		if (null == buf) {
+			LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+					MAX_MSG_SIZE);
+			return false;
+		}
+		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					c.majorVersion(), c.minorVersion());
+			return false;
+		}
+		rc = request.encode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.error ("RequestMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
 
-		LOG.trace ("Registering OMM item interest for MMT_DICTIONARY/{}/{}", service_name, dictionary_name);
-		OMMMsg msg = request.getMsg (this.omm_pool);
-		OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-		ommItemIntSpec.setMsg (msg);
-		this.dictionary_handle.put (dictionary_name,
-			new FlaggedHandle (this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, dictionary_name /* closure */)));
+/* Message validation. */
+		if (!request.validateMsg()) {
+			LOG.error ("RequestMsg.validateMsg failed.");
+			return false;
+		}
+
+		if (0 == this.Submit (c, buf)) {
+			return false;
+		} else {
+/* re-use token on failure. */
+			this.dictionary_tokens.put (dictionary_name, this.token++);
+			return true;
+		}
 	}
 
 	@Override
@@ -1673,7 +2591,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		LOG.trace (event);
 		switch (event.getType()) {
 		case Event.OMM_ITEM_EVENT:
-			this.OnOMMItemEvent ((OMMItemEvent)event);
+			this.OnOMMItemEvent (this.connection, (OMMItemEvent)event);
 			break;
 
 // RFA 7.5.1
@@ -1689,7 +2607,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 /* Handling Item Events, message types are munged c.f. C++ API.
  */
-	private void OnOMMItemEvent (OMMItemEvent event) {
+	private void OnOMMItemEvent (Channel c, OMMItemEvent event) {
 		LOG.trace ("OnOMMItemEvent: {}", event);
 		final OMMMsg msg = event.getMsg();
 
@@ -1699,7 +2617,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		case OMMMsg.MsgType.UPDATE_RESP:
 		case OMMMsg.MsgType.STATUS_RESP:
 		case OMMMsg.MsgType.ACK_RESP:
-			this.OnRespMsg (msg, event.getHandle(), event.getClosure());
+			this.OnRespMsg (c, msg, event.getHandle(), event.getClosure());
 			break;
 
 /* Generic message */
@@ -1714,23 +2632,23 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		}
 	}
 
-	private void OnRespMsg (OMMMsg msg, Handle handle, Object closure) {
+	private void OnRespMsg (Channel c, OMMMsg msg, Handle handle, Object closure) {
 		LOG.trace ("OnRespMsg: {}", msg);
 		switch (msg.getMsgModelType()) {
 		case RDMMsgTypes.LOGIN:
-			this.OnLoginResponse (msg);
+			this.OnLoginResponse (c, msg);
 			break;
 
 		case RDMMsgTypes.DIRECTORY:
-			this.OnDirectoryResponse (msg);
+			this.OnDirectoryResponse (c, msg);
 			break;
 
 		case RDMMsgTypes.DICTIONARY:
-			this.OnDictionaryResponse (msg, handle, closure);
+			this.OnDictionaryResponse (c, msg, handle, closure);
 			break;
 
 		case RDMMsgTypes.MARKET_PRICE:
-			this.OnMarketPrice (msg);
+			this.OnMarketPrice (c, msg);
 			break;
 
 		default:
@@ -1739,7 +2657,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		}
 	}
 
-	private void OnLoginResponse (OMMMsg msg) {
+	private void OnLoginResponse (Channel c, OMMMsg msg) {
 		LOG.trace ("OnLoginResponse: {}", msg);
 		if (LOG.isDebugEnabled()) {
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -1755,11 +2673,11 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		case OMMState.Stream.OPEN:
 			switch (data_state) {
 			case OMMState.Data.OK:
-				this.OnLoginSuccess (response);
+				this.OnLoginSuccess (c, response);
 				break;
 
 			case OMMState.Data.SUSPECT:
-				this.OnLoginSuspect (response);
+				this.OnLoginSuspect (c, response);
 				break;
 
 			default:
@@ -1769,7 +2687,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 			break;
 
 		case OMMState.Stream.CLOSED:
-			this.OnLoginClosed (response);
+			this.OnLoginClosed (c, response);
 			break;
 
 		default:
@@ -1780,31 +2698,31 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 /* Login Success.
  */
-	private void OnLoginSuccess (RDMLoginResponse response) {
+	private void OnLoginSuccess (Channel c, RDMLoginResponse response) {
 		LOG.trace ("OnLoginSuccess: {}", response);
 		LOG.trace ("Unmuting consumer.");
 		this.is_muted = false;
 		if (!this.pending_dictionary)
-			this.resubscribe();
+			this.Resubscribe();
 	}
 
 /* Other Login States.
  */
-	private void OnLoginSuspect (RDMLoginResponse response) {
+	private void OnLoginSuspect (Channel c, RDMLoginResponse response) {
 		LOG.trace ("OnLoginSuspect: ResponseStatus: {}", response.getRespStatus());
 		this.is_muted = true;
 	}
 
 /* Login Closed.
  */
-	private void OnLoginClosed (RDMLoginResponse response) {
+	private void OnLoginClosed (Channel c, RDMLoginResponse response) {
 		LOG.trace ("OnLoginClosed: {}", response);
 		this.is_muted = true;
 	}
 
 /* MMT_DIRECTORY domain.  Request RDM dictionaries, RWFFld and RWFEnum, from first available service.
  */
-	private void OnDirectoryResponse (OMMMsg msg) {
+	private void OnDirectoryResponse (Channel c, OMMMsg msg) {
 		LOG.trace ("OnDirectoryResponse: {}", msg);
 		if (LOG.isDebugEnabled()) {
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -1834,7 +2752,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
  * providing its own dictionary overriding anything from the provider.
  */
 		String dictionary_service = null;
-		for (Service service : payload.getServiceList()) {
+		int dictionary_service_id = 0;
+/*		for (Service service : payload.getServiceList()) {
 			if (!service.hasServiceName()) {
 				LOG.trace ("Ignoring listed service due to empty name.");
 				continue;
@@ -1869,7 +2788,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				LOG.trace ("{}: Ignoring service without service state indicator.", service.getServiceName());
 				continue;
 			}
-		}
+		} */
 
 		if (Strings.isNullOrEmpty (dictionary_service)) {
 			LOG.trace ("No service available to accept dictionary requests, waiting for service change in directory update.");
@@ -1877,12 +2796,13 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		}
 
 /* Hard code to RDM dictionary names */
-		if (!this.dictionary_handle.containsKey ("RWFFld")) {
+//		if (!this.dictionary_handle.containsKey ("RWFFld")) {
 /* Local file override */
 			if (!this.config.hasFieldDictionary()) {
-				this.sendDictionaryRequest (dictionary_service, "RWFFld");
+				this.SendDictionaryRequest (c, dictionary_service_id, "RWFFld");
 			} else {
-				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
+final FieldDictionary field_dictionary = null;
+//				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
 				FieldDictionary.readRDMFieldDictionary (field_dictionary, this.config.getFieldDictionary());
 /* Additional meta-data only from file dictionaries */
 				LOG.trace ("RDM field dictionary file \"{}\": { " +
@@ -1897,13 +2817,14 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 						field_dictionary.getFieldProperty ("Build"),
 						field_dictionary.getFieldProperty ("Date"));
 			}
-		}
+//		}
 
-		if (!this.dictionary_handle.containsKey ("RWFEnum")) {
+//		if (!this.dictionary_handle.containsKey ("RWFEnum")) {
 			if (!this.config.hasEnumDictionary()) {
-				this.sendDictionaryRequest (dictionary_service, "RWFEnum");
+				this.SendDictionaryRequest (c, dictionary_service_id, "RWFEnum");
 			} else {
-				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
+final FieldDictionary field_dictionary = null;
+//				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
 				FieldDictionary.readEnumTypeDef (field_dictionary, this.config.getEnumDictionary());
 				LOG.trace ("RDM enumerated tables file \"{}\": { " +
 						  "\"Desc\": \"{}\"" +
@@ -1919,16 +2840,16 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 						field_dictionary.getEnumProperty ("DT_Version"),
 						field_dictionary.getEnumProperty ("Date"));
 			}
-		}
+//		}
 
-		if (0 == this.dictionary_handle.size()) {
+//		if (0 == this.dictionary_handle.size()) {
 			if (LOG.isDebugEnabled()) {
-				GenericOMMParser.initializeDictionary (this.rdm_dictionary.getFieldDictionary());
+//				GenericOMMParser.initializeDictionary (this.rdm_dictionary.getFieldDictionary());
 			}
 			LOG.trace ("All dictionaries loaded, resuming subscriptions.");
 			this.pending_dictionary = false;
-			this.resubscribe();
-		}
+			this.Resubscribe();
+//		}
 
 /* Directory received and processed, ignore all future updates. */
 		this.pending_directory = false;
@@ -1943,7 +2864,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
  * response message with a DataState of Suspect. It is the consumer’s
  * responsibility to reissue the dictionary request.
  */
-	private void OnDictionaryResponse (OMMMsg msg, Handle handle, Object closure) {
+	private void OnDictionaryResponse (Channel c, OMMMsg msg, Handle handle, Object closure) {
 		LOG.trace ("OnDictionaryResponse: {}", msg);
 		final RDMDictionaryResponse response = new RDMDictionaryResponse (msg);
 /* Receiving dictionary */
@@ -1953,11 +2874,12 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		if (response.getMessageType() == RDMDictionaryResponse.MessageType.REFRESH_RESP
 			&& response.hasPayload() && null != response.getPayload())
 		{
-			this.rdm_dictionary.load (response.getPayload(), handle);
+//			this.rdm_dictionary.load (response.getPayload(), handle);
 		}
 
 /* Only know type after it is loaded. */
-		final RDMDictionary.DictionaryType dictionary_type = this.rdm_dictionary.getDictionaryType (handle);
+final RDMDictionary.DictionaryType dictionary_type = null;
+//		final RDMDictionary.DictionaryType dictionary_type = this.rdm_dictionary.getDictionaryType (handle);
 
 /* Received complete dictionary */
 		if (response.getMessageType() == RDMDictionaryResponse.MessageType.REFRESH_RESP
@@ -1965,7 +2887,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		{
 			LOG.trace ("Dictionary complete.");
 /* Check dictionary version */
-			FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
+FieldDictionary field_dictionary = null;
+//			FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
 			if (RDMDictionary.DictionaryType.RWFFLD == dictionary_type)
 			{
 				LOG.trace ("RDM field definitions version: {}", field_dictionary.getFieldProperty ("Version"));
@@ -1979,21 +2902,21 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 			if (LOG.isDebugEnabled()) {
 				GenericOMMParser.initializeDictionary (field_dictionary);
 			}
-			this.dictionary_handle.get ((String)closure).setFlag();
+//			this.dictionary_handle.get ((String)closure).setFlag();
 
 /* Check all pending dictionaries */
-			int pending_dictionaries = this.dictionary_handle.size();
-			for (FlaggedHandle flagged_handle : this.dictionary_handle.values()) {
-				if (flagged_handle.isFlagged())
-					--pending_dictionaries;
-			}
-			if (0 == pending_dictionaries) {
-				LOG.trace ("All used dictionaries loaded, resuming subscriptions.");
-				this.pending_dictionary = false;
-				this.resubscribe();
-			} else {
-				LOG.trace ("Dictionaries pending: {}", pending_dictionaries);
-			}
+//			int pending_dictionaries = this.dictionary_handle.size();
+//			for (FlaggedHandle flagged_handle : this.dictionary_handle.values()) {
+//				if (flagged_handle.isFlagged())
+//					--pending_dictionaries;
+//			}
+//			if (0 == pending_dictionaries) {
+//				LOG.trace ("All used dictionaries loaded, resuming subscriptions.");
+//				this.pending_dictionary = false;
+//				this.Resubscribe();
+//			} else {
+//				LOG.trace ("Dictionaries pending: {}", pending_dictionaries);
+//			}
 		}
 	}
 
@@ -2007,7 +2930,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 /* MMT_MARKETPRICE domain.
  */
-	private void OnMarketPrice (OMMMsg msg) {
+	private void OnMarketPrice (Channel c, OMMMsg msg) {
 	}
 
 }
