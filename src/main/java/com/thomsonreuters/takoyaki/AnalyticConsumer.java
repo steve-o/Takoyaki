@@ -213,7 +213,6 @@ public class AnalyticConsumer implements Client {
 /* incrementing unique id for streams */
 	int token;
 	int directory_token;
-	int dictionary_token;
 	int login_token;	/* should always be 1 */
 /* RSSL keepalive state. */
 	Instant next_ping;
@@ -1316,6 +1315,8 @@ final FidDef fid_def = null;
 
 		this.directory = new LinkedList<ItemStream>();
 		this.tokens = new LinkedHashMap<Integer, ItemStream>();
+		this.dictionary_tokens = new TreeMap<String, Integer>();
+		this.rdm_dictionary = CodecFactory.createDataDictionary();
 		return true;
 	}
 
@@ -1637,6 +1638,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			info.clientToServerPings(), components.toString(), info.compressionThreshold(), info.compressionType(), CompressionTypes.toString (info.compressionType()), info.guaranteedOutputBuffers(), info.maxFragmentSize(), info.maxOutputBuffers(), info.numInputBuffers(), info.pingTimeout(), info.priorityFlushStrategy(), info.serverToClientPings(), info.sysRecvBufSize(), info.sysSendBufSize());
 /* First token aka stream id */
 		this.token = 1;
+		this.dictionary_tokens.clear();
 /* Derive expected RSSL ping interval from negotiated timeout. */
 		this.ping_interval = c.pingTimeout() / 3;
 /* Schedule first RSSL ping. */
@@ -2073,7 +2075,9 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		this.service_map = builder.build();
 
 /* Request dictionary on first directory message. */
-		if (null == this.rdm_dictionary) {
+		if (0 == this.rdm_dictionary.enumTableCount()
+			&& 0 == this.rdm_dictionary.numberOfEntries())
+		{
 			if (this.service_map.isEmpty()) {
 				LOG.warn ("Upstream provider has no configured services, unable to request a dictionary.");
 				return true;
@@ -2144,7 +2148,6 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		int rc;
 
 		LOG.debug ("OnDictionaryRefresh");
-
 		switch (response.dictionaryType()) {
 		case Dictionary.Types.FIELD_DEFINITIONS:
 			rc = this.rdm_dictionary.decodeFieldDictionary (it, Dictionary.VerbosityValues.NORMAL, rssl_err);
@@ -2169,7 +2172,10 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			return true;
 		}
 
-		if (0 != (response.flags() & DictionaryRefreshFlags.IS_COMPLETE)) {
+		if (0 != (response.flags() & DictionaryRefreshFlags.IS_COMPLETE)
+			&& 0 != this.rdm_dictionary.enumTableCount()
+			&& 0 != this.rdm_dictionary.numberOfEntries())
+		{
 			LOG.info ("Dictionary reception complete.");
 /* Permit new subscriptions. */
 			this.is_muted = false;
