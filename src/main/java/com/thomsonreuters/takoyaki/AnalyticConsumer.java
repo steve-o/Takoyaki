@@ -1352,12 +1352,14 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 				continue;
 
 			try {
-//				final int rc = this.selector.select (timeout /* milliseconds */);
-				final int rc = this.selector.select ();
+				final int rc = this.selector.select (timeout /* milliseconds */);
+//				final int rc = this.selector.select ();
 LOG.trace ("select -> {}/{}/{} ({})", rc, this.selector.selectedKeys().size(), this.selector.keys().size(), timeout);
 LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 				if (rc > 0) {
 					this.out_keys = this.selector.selectedKeys();
+				} else {
+					this.out_keys = null;
 				}
 			} catch (Exception e) {
 				LOG.catching (e);
@@ -1368,12 +1370,28 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 	}
 
 	private boolean DoWork() {
-//		LOG.trace ("DoWork");
+		LOG.trace ("DoWork");
 		boolean did_work = false;
 
 		this.last_activity = Instant.now();
 
 /* Only check keepalives on timeout */
+		if (null == this.out_keys
+			&& null != this.connection)
+		{
+			final Channel c = this.connection;
+			LOG.debug ("timeout, state {}", ChannelState.toString (c.state()));
+			if (ChannelState.ACTIVE == c.state()) {
+				if (this.last_activity.isAfter (this.NextPing())) {
+					this.Ping (c);
+				}
+				if (this.last_activity.isAfter (this.NextPong())) {
+					LOG.error ("Pong timeout from peer, aborting connection.");
+					this.Abort (c);
+				}
+			}
+			return false;
+		}
 
 /* Client connection */
 		if (null == this.connection) {
@@ -1386,21 +1404,27 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			Iterator<SelectionKey> it = this.selector.selectedKeys().iterator();
 			while (it.hasNext()) {
 				final SelectionKey key = it.next();
-				it.remove();
+				key.attach (Boolean.TRUE);
+/* connected */
+				if (key.isConnectable()) {
+					key.attach (Boolean.FALSE);
+					this.OnCanConnectWithoutBlocking (c);
+					did_work = true;
+				}
 /* incoming */
 				if (key.isReadable()) {
+					key.attach (Boolean.FALSE);
 					this.OnCanReadWithoutBlocking (c);
 					did_work = true;
 				}
 /* outgoing */
 				if (key.isWritable()) {
+					key.attach (Boolean.FALSE);
 					this.OnCanWriteWithoutBlocking (c);
 					did_work = true;
 				}
-/* connected */
-				if (key.isConnectable()) {
-					this.OnCanConnectWithoutBlocking (c);
-					did_work = true;
+				if (Boolean.FALSE.equals (key.attachment())) {
+					it.remove();
 				}
 			}
 /* Keepalive timeout on active session above connection */
@@ -1429,6 +1453,8 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 
 		LOG.info ("Initiating new connection.");
 
+/* non-blocking mode to be used with a Selector. */
+		addr.blocking (false);
 		addr.channelReadLocking (false);
 		addr.channelWriteLocking (false);
 		addr.unifiedNetworkInfo().address (this.config.getServers()[0]);
@@ -1448,7 +1474,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 
 /* Wait for session */
 			try {
-				c.selectableChannel().register (this.selector, SelectionKey.OP_CONNECT , c);
+				c.selectableChannel().register (this.selector, SelectionKey.OP_CONNECT | SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
 			} catch (ClosedChannelException e) {
 /* leave error handling to Channel wrapper */
 				LOG.catching (e);
@@ -1471,11 +1497,6 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			break;
 		case ChannelState.INITIALIZING:
 			LOG.info ("socket state is initializing.");
-			try {
-				c.selectableChannel().keyFor (selector).interestOps (SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-			} catch (Exception e) {
-				LOG.catching (e);
-			}
 			this.OnInitializingState (c);
 			break;
 		default:
@@ -1518,7 +1539,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 				LOG.info ("RSSL protocol downgrade, reconnected.");
 				state.oldSelectableChannel().keyFor (this.selector).cancel();
 				try {
-					c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+					c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
 				} catch (ClosedChannelException e) {
 					LOG.catching (e);
 				}
@@ -1529,7 +1550,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		case TransportReturnCodes.SUCCESS:
 			this.OnActiveSession (c);
 			try {
-				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
 			} catch (ClosedChannelException e) {
 				LOG.catching (e);
 			}
@@ -1828,7 +1849,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			LOG.info ("RSSL reconnected.");
 			c.oldSelectableChannel().keyFor (this.selector).cancel();
 			try {
-				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, c);
+				c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
 			} catch (ClosedChannelException e) {
 				LOG.catching (e);
 			}
@@ -1854,7 +1875,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			{
 /* pending buffer needs flushing out before IO notification can resume */
 				final SelectionKey key = c.selectableChannel().keyFor (selector);
-				key.interestOps (key.interestOps() & SelectionKey.OP_READ);
+				key.attach (Boolean.TRUE);
 			}
 		}
 	}
