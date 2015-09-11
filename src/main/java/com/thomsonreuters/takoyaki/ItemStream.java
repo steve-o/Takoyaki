@@ -8,7 +8,9 @@ import org.zeromq.ZMQ;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
-import com.reuters.rfa.common.Handle;
+import com.thomsonreuters.upa.codec.DecodeIterator;
+import com.thomsonreuters.upa.codec.Msg;
+import com.thomsonreuters.upa.transport.Channel;
 
 public class ItemStream {
 /* Fixed name for this stream. */
@@ -23,16 +25,25 @@ public class ItemStream {
 
 /* Subscription handle which is valid from login success to login close. */
 	public int token;
-/* Pending subscription handle as part of RSSL batch request */
-	private Handle batch_handle;
+/* Stream type, public or private distribution at fan-out point. */
+	public boolean is_private_stream;
 
 	private int reference_count;
 	private ItemStreamDispatcher dispatcher;
+	public Delegate delegate;
 
 /* Performance counters */
 
+/* Delegate implementing RFA like callbacks */
+	public interface Delegate {
+		public boolean OnMsg (Channel c, DecodeIterator it, Msg msg);
+	}
+
+	public ItemStream (Delegate delegate) {
+		this.delegate = delegate;
+	}
+
 	public ItemStream (ItemStreamDispatcher dispatcher) {
-		this.clearBatchHandle();
 		this.reference_count = 1;
 		this.dispatcher = dispatcher;
 	}
@@ -75,22 +86,6 @@ public class ItemStream {
 
 	public boolean hasViewByFid() {
 		return null != this.getViewByFid();
-	}
-
-	public Handle getBatchHandle() {
-		return this.batch_handle;
-	}
-
-	public boolean hasBatchHandle() {
-		return null != this.getBatchHandle();
-	}
-
-	public void setBatchHandle (Handle batch_handle) {
-		this.batch_handle = batch_handle;
-	}
-
-	public void clearBatchHandle() {
-		this.setBatchHandle (null);
 	}
 
 	public int referenceExchangeAdd (int val) {

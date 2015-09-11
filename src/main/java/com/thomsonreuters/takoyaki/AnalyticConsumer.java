@@ -166,7 +166,7 @@ import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsgType;
 import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginRefresh;
 import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginStatus;
 
-public class AnalyticConsumer implements Client {
+public class AnalyticConsumer implements ItemStream.Delegate {
 	private static Logger LOG = LogManager.getLogger (AnalyticConsumer.class.getName());
 	private static final Marker SHOGAKOTTO_MARKER = MarkerManager.getMarker ("SHOGAKOTTO");
 	private static final String LINE_SEPARATOR = System.getProperty ("line.separator");
@@ -251,7 +251,7 @@ public class AnalyticConsumer implements Client {
 		return this.pending_count;
 	}
 
-	private class App implements Client {
+	private class App implements ItemStream.Delegate {
 /* ERROR: modifier 'static' is only allowed in constant variable declarations */
 		private Logger LOG = LogManager.getLogger (App.class.getName());
 
@@ -268,18 +268,17 @@ public class AnalyticConsumer implements Client {
 		private int stream_id;
 		private boolean pending_connection;	/* to app */
 		private ResponseStatus closed_response_status;
-		private Handle private_stream;
-		private int private_stream_token;
+		private ItemStream private_stream;
 
 		public App (String service_name, String app_name, String uuid, String password) {
-			this.service_name = service_name;
 			this.app_name = app_name;
 			this.uuid = uuid;
 			this.password = password;
 			this.streams = Lists.newLinkedList();
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
-			this.private_stream_token = 0;
+			this.private_stream = new ItemStream (this);
+			this.private_stream.setServiceName (service_name);
 			this.setPendingConnection();
 // Appears until infrastructure returns new close status to present.
 			this.closed_response_status = new ResponseStatus (OMMState.Stream.CLOSED, OMMState.Data.SUSPECT, OMMState.Code.NO_RESOURCES, "No service private stream available to process the request.");
@@ -287,7 +286,7 @@ public class AnalyticConsumer implements Client {
 
 		private boolean CreatePrivateStream (Channel c) {
 			LOG.trace ("Creating app \"{}\" private stream on service \"{}\".",
-				this.app_name, this.service_name);
+				this.app_name, this.private_stream.getServiceName());
 			final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
 /* Set the message model type. */
 //			request.domainType (DomainTypes.SYSTEM);
@@ -303,7 +302,7 @@ LOG.debug ("private stream token {}", token);
 
 /* In RFA lingo an attribute object */
 			request.msgKey().name().data (this.uuid);
-			request.msgKey().serviceId (service_map.get (this.service_name));
+			request.msgKey().serviceId (service_map.get (this.private_stream.getServiceName()));
 			request.msgKey().flags (MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_SERVICE_ID);
 
 request.flags (request.flags() | RequestMsgFlags.HAS_QOS);
@@ -417,7 +416,8 @@ request.qos().timeInfo (0);
 			if (0 == Submit (c, buf)) {
 				return false;
 			} else {
-				this.private_stream_token = token++;
+				this.private_stream.token = token++;
+				tokens.put (this.private_stream.token, this.private_stream);
 				return true;
 			}
 		}
@@ -483,7 +483,7 @@ request.qos().timeInfo (0);
 			LOG.trace ("Sending analytic query request.");
 			OMMMsg msg = this.omm_pool.acquireMsg();
 			msg.setStreamId (stream.getStreamId());
-			msg.setAssociatedMetaInfo (this.private_stream);
+//			msg.setAssociatedMetaInfo (this.private_stream);
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 
 			if (stream.getAppName().equals ("History"))
@@ -573,7 +573,7 @@ request.qos().timeInfo (0);
 				this.omm_encoder.encodeAggregateComplete();
 			}
 
-			stream.setCommandId (this.sendGenericMsg ((OMMMsg)this.omm_encoder.getEncodedObject(), this.private_stream, stream));
+//			stream.setCommandId (this.sendGenericMsg ((OMMMsg)this.omm_encoder.getEncodedObject(), this.private_stream, stream));
 			this.omm_pool.releaseMsg (msg);
 		}
 
@@ -588,7 +588,7 @@ request.qos().timeInfo (0);
 			msg.setStreamId (stream.getStreamId());
 			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
-			msg.setAssociatedMetaInfo (this.private_stream);
+//			msg.setAssociatedMetaInfo (this.private_stream);
 /* RFA 7.6.0.L1 bug translates this to a NOP request which Signals interprets as a close.
  * RsslRequestFlags = 0x20 = RSSL_RQMF_NO_REFRESH
  * Indicates that the user does not require an RsslRefreshMsg for this request
@@ -598,7 +598,7 @@ request.qos().timeInfo (0);
 			msg.setIndicationFlags (OMMMsg.Indication.PAUSE_REQ);
 			msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
 
-			stream.setCommandId (this.sendGenericMsg (msg, this.private_stream, stream));
+//			stream.setCommandId (this.sendGenericMsg (msg, this.private_stream, stream));
 			this.omm_pool.releaseMsg (msg);
 		}
 
@@ -631,20 +631,14 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
 		}
 
 		@Override
-		public void processEvent (Event event) {
-			LOG.trace (event);
-			switch (event.getType()) {
-			case Event.OMM_ITEM_EVENT:
-				this.OnOMMItemEvent ((OMMItemEvent)event);
-				break;
-
-			case Event.TIMER_EVENT:
-				this.OnTimerEvent (event);
-				break;
-
+		public boolean OnMsg (Channel c, DecodeIterator it, Msg msg) {
+			switch (msg.domainType()) {
+/* FIXME: DomainTypes.SYSTEM */
+			case DomainTypes.HISTORY:
+				return this.OnSystem (c, it, msg);
 			default:
-				LOG.trace ("Uncaught: {}", event);
-				break;
+				LOG.warn ("Uncaught message: {}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
+				return true;
 			}
 		}
 
@@ -707,7 +701,7 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
 case 12 /* RDMMsgTypes.HISTORY */:
 case 30 /* RDMMsgTypes.ANALYTICS */:
 			case 127 /* RDMMsgTypes.SYSTEM */:
-				this.OnAppResponse (msg, handle, closure);
+//				this.OnAppResponse (msg, handle, closure);
 				break;
 
 			default:
@@ -1227,14 +1221,11 @@ final FidDef fid_def = null;
 			this.destroyItemStream (stream);
 		}
 
-		private void OnAppResponse (OMMMsg msg, Handle handle, Object closure) {
+		private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
 			if (LOG.isDebugEnabled()) {
-				ByteArrayOutputStream baos = new ByteArrayOutputStream();
-				PrintStream ps = new PrintStream (baos);
-				GenericOMMParser.parseMsg (msg, ps);
-				LOG.debug ("App response:{}{}", LINE_SEPARATOR, baos.toString());
+				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			}
-			final AppLoginResponse response = new AppLoginResponse (msg);
+/*			final AppLoginResponse response = new AppLoginResponse (msg);
 			final byte stream_state = response.getRespStatus().getStreamState();
 			final byte data_state   = response.getRespStatus().getDataState();
 
@@ -1253,13 +1244,13 @@ final FidDef fid_def = null;
 					LOG.trace ("Uncaught data state: {}", response.getRespStatus());
 					break;
 				}
-				break;
+				break; */
 
 /* CLOSED is supposed to be a terminal status like something is not found or entitled.
  * CLOSED_RECOVER is a transient problem that the consumer should attempt recovery such as 
  * out of resources and thus unenable to store the request.
  */
-			case OMMState.Stream.CLOSED:
+/*			case OMMState.Stream.CLOSED:
 			case OMMState.Stream.CLOSED_RECOVER:
 				this.OnAppClosed (response);
 				break;
@@ -1267,7 +1258,8 @@ final FidDef fid_def = null;
 			default:
 				LOG.trace ("Uncaught stream state: {}", response.getRespStatus());
 				break;
-			}
+			} */
+			return true;
 		}
 
 		private void OnAppSuccess (AppLoginResponse response) {
@@ -1340,7 +1332,7 @@ final FidDef fid_def = null;
 		}
 
 		public boolean hasConnectionHandle() {
-			return 0 != this.private_stream_token;
+			return 0 != this.private_stream.token;
 		}
 
 		public void sendConnectionRequest() {
@@ -2100,7 +2092,8 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 
 /* Returns true if message processed successfully, returns false to abort the connection.
  */
-	private boolean OnMsg (Channel c, DecodeIterator it, Msg msg) {
+	@Override
+	public boolean OnMsg (Channel c, DecodeIterator it, Msg msg) {
 		switch (msg.domainType()) {
 		case DomainTypes.LOGIN:
 			return this.OnLoginResponse (c, it, msg);
@@ -2108,6 +2101,9 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			return this.OnDirectory (c, it, msg);
 		case DomainTypes.DICTIONARY:
 			return this.OnDictionary (c, it, msg);
+/* FIXME: DomainTypes.SYSTEM */
+		case DomainTypes.HISTORY:
+			return this.OnSystem (c, it, msg);
 		default:
 			LOG.warn ("Uncaught message: {}", this.DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			return true;
@@ -2286,6 +2282,18 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			LOG.warn ("Uncaught dictionay response message type: {}", msg);
 			return true;
 		}
+	}
+
+/* thunk to app object for private stream processing. */
+	private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
+		final int token = msg.streamId();
+		LOG.trace ("token {}", token);
+		final ItemStream stream = this.tokens.get (token);
+		if (null == stream) {
+			LOG.error ("SYSTEM domain message received on unregistered token.");
+			return false;
+		}
+		return stream.delegate.OnMsg (c, it, msg);
 	}
 
 /* Replace any existing RDM dictionary upon a dictionary refresh message.
@@ -2745,7 +2753,6 @@ LOG.debug ("dictionary token {}", this.token);
 		}
 	}
 
-	@Override
 	public void processEvent (Event event) {
 		LOG.trace (event);
 		switch (event.getType()) {
