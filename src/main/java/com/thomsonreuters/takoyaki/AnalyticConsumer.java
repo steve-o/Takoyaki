@@ -269,12 +269,9 @@ public class AnalyticConsumer implements Client {
 		private boolean pending_connection;	/* to app */
 		private ResponseStatus closed_response_status;
 		private Handle private_stream;
+		private int private_stream_token;
 
-		public App (OMMConsumer omm_consumer, OMMPool omm_pool, OMMEncoder omm_encoder, OMMEncoder omm_encoder2, String service_name, String app_name, String uuid, String password) {
-			this.omm_consumer = omm_consumer;
-			this.omm_pool = omm_pool;
-			this.omm_encoder = omm_encoder;
-			this.omm_encoder2 = omm_encoder2;
+		public App (String service_name, String app_name, String uuid, String password) {
 			this.service_name = service_name;
 			this.app_name = app_name;
 			this.uuid = uuid;
@@ -282,46 +279,147 @@ public class AnalyticConsumer implements Client {
 			this.streams = Lists.newLinkedList();
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
+			this.private_stream_token = 0;
 			this.setPendingConnection();
 // Appears until infrastructure returns new close status to present.
 			this.closed_response_status = new ResponseStatus (OMMState.Stream.CLOSED, OMMState.Data.SUSPECT, OMMState.Code.NO_RESOURCES, "No service private stream available to process the request.");
 		}
 
-		private void createPrivateStream() {
+		private boolean CreatePrivateStream (Channel c) {
 			LOG.trace ("Creating app \"{}\" private stream on service \"{}\".",
 				this.app_name, this.service_name);
-			OMMMsg msg = this.omm_pool.acquireMsg();
-			msg.setMsgType (OMMMsg.MsgType.REQUEST);
-			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
-msg.setMsgModelType ((short)12 /* RDMMsgTypes.SYSTEM */);
-//			msg.setAssociatedMetaInfo (this.login_handle);
-			msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
-			OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
-			attribInfo.setServiceName (this.service_name);
-			attribInfo.setName (this.uuid);
-			msg.setAttribInfo (attribInfo);
-			this.omm_pool.releaseAttribInfo (attribInfo);
-			OMMItemIntSpec ommItemIntSpec = new OMMItemIntSpec();
-/* Authorization for the app */
-			this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-			this.omm_encoder.encodeMsgInit (msg, OMMTypes.ELEMENT_LIST, OMMTypes.NO_DATA);
-			this.omm_encoder.encodeElementListInit (OMMElementList.HAS_STANDARD_DATA, (short)0, (short)0);
-// username
-			this.omm_encoder.encodeElementEntryInit ("Name", OMMTypes.ASCII_STRING);
-			this.omm_encoder.encodeString (this.uuid, OMMTypes.ASCII_STRING);
-// password
-			this.omm_encoder.encodeElementEntryInit ("Password", OMMTypes.ASCII_STRING);
-			this.omm_encoder.encodeString (this.password, OMMTypes.ASCII_STRING);
-			this.omm_encoder.encodeAggregateComplete();
-			ommItemIntSpec.setMsg ((OMMMsg)this.omm_encoder.getEncodedObject());
-			if (LOG.isDebugEnabled()) {
-				ByteArrayOutputStream baos = new ByteArrayOutputStream();
-				PrintStream ps = new PrintStream (baos);
-				GenericOMMParser.parseMsg (msg, ps);
-				LOG.debug ("Private stream request:{}{}", LINE_SEPARATOR, baos.toString());
+			final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+//			request.domainType (DomainTypes.SYSTEM);
+request.domainType (DomainTypes.HISTORY);
+/* Set request type. */
+			request.msgClass (MsgClasses.REQUEST);
+			request.flags (RequestMsgFlags.STREAMING | RequestMsgFlags.PRIVATE_STREAM);
+/* No view thus no payload. */
+			request.containerType (DataTypes.NO_DATA);
+/* Set the stream token. */
+			request.streamId (token);
+LOG.debug ("private stream token {}", token);
+
+/* In RFA lingo an attribute object */
+			request.msgKey().name().data (this.uuid);
+			request.msgKey().serviceId (service_map.get (this.service_name));
+			request.msgKey().flags (MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_SERVICE_ID);
+
+request.flags (request.flags() | RequestMsgFlags.HAS_QOS);
+request.qos().dynamic (false);
+request.qos().rate (com.thomsonreuters.upa.codec.QosRates.TICK_BY_TICK);
+request.qos().timeliness (com.thomsonreuters.upa.codec.QosTimeliness.REALTIME);
+request.qos().rateInfo (0);
+request.qos().timeInfo (0);
+
+/* ASG login credentials */
+			request.msgKey().attribContainerType (DataTypes.ELEMENT_LIST);
+			request.msgKey().flags (request.msgKey().flags() | MsgKeyFlags.HAS_ATTRIB);
+
+			final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+			final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+			if (null == buf) {
+				LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+					MAX_MSG_SIZE);
+				return false;
 			}
-//			this.private_stream = this.omm_consumer.registerClient (this.event_queue, ommItemIntSpec, this, null);
-			this.omm_pool.releaseMsg (msg);
+			final EncodeIterator it = CodecFactory.createEncodeIterator();
+			it.clear();
+			int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					c.majorVersion(), c.minorVersion());
+				return false;
+			}
+			rc = request.encodeInit (it, MAX_MSG_SIZE);
+			if (CodecReturnCodes.ENCODE_MSG_KEY_ATTRIB != rc) {
+				LOG.error ("RequestMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+
+/* Encode attribute object after message instead of before as per RFA. */
+			final ElementList element_list = CodecFactory.createElementList();
+			final ElementEntry element_entry = CodecFactory.createElementEntry();
+			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
+			element_list.flags (ElementListFlags.HAS_STANDARD_DATA);
+			rc = element_list.encodeInit (it, null /* element id dictionary */, 0 /* count of elements */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("RequestMsg.encodeInit: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"flags\": \"HAS_STANDARD_DATA\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+/* user name */
+			rssl_buffer.data (this.uuid);
+			element_entry.dataType (DataTypes.ASCII_STRING);
+			final com.thomsonreuters.upa.codec.Buffer asg_name = CodecFactory.createBuffer();
+			asg_name.data ("Name");
+			element_entry.name (asg_name);
+			rc = element_entry.encode (it, rssl_buffer);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"data\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_buffer);
+				return false;
+			}
+/* password */
+			rssl_buffer.data (this.password);
+			element_entry.dataType (DataTypes.ASCII_STRING);
+			final com.thomsonreuters.upa.codec.Buffer asg_password = CodecFactory.createBuffer();
+			asg_password.data ("Password");
+			element_entry.name (asg_password);
+			rc = element_entry.encode (it, rssl_buffer);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("ElementEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"name\": \"{}\", \"dataType\": \"{}\", \"data\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					element_entry.name(), DataTypes.toString (element_entry.dataType()), rssl_buffer);
+				return false;
+			}
+			rc = element_list.encodeComplete (it, true /* commit */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("ElementList.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			rc = request.encodeKeyAttribComplete (it, true /* commit */);
+			if (CodecReturnCodes.ENCODE_CONTAINER != rc) {
+				LOG.error ("RequestMsg.encodeKeyAttribComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			rc = request.encodeComplete (it, true /* commit */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("RequestMsg.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+
+			if (LOG.isDebugEnabled()) {
+				final DecodeIterator jt = CodecFactory.createDecodeIterator();
+				jt.clear();
+				rc = jt.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.warn ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				} else {
+					LOG.debug ("{}", request.decodeToXml (jt));
+				}
+			}
+/* Message validation. */
+			if (!request.validateMsg()) {
+				LOG.error ("RequestMsg.validateMsg failed.");
+				return false;
+			}
+
+			if (0 == Submit (c, buf)) {
+				return false;
+			} else {
+				this.private_stream_token = token++;
+				return true;
+			}
 		}
 
 		public void createItemStream (AnalyticStream stream) {
@@ -1242,11 +1340,11 @@ final FidDef fid_def = null;
 		}
 
 		public boolean hasConnectionHandle() {
-			return null != this.private_stream;
+			return 0 != this.private_stream_token;
 		}
 
 		public void sendConnectionRequest() {
-			this.createPrivateStream();
+			this.CreatePrivateStream (connection);
 		}
 	}
 
@@ -1353,9 +1451,6 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 
 			try {
 				final int rc = this.selector.select (timeout /* milliseconds */);
-//				final int rc = this.selector.select ();
-LOG.trace ("select -> {}/{}/{} ({})", rc, this.selector.selectedKeys().size(), this.selector.keys().size(), timeout);
-LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 				if (rc > 0) {
 					this.out_keys = this.selector.selectedKeys();
 				} else {
@@ -1726,15 +1821,14 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 /* lazy app private stream creation */
 		App app = this.apps.get (analytic.getApp());
 		if (null == app) {
-			app = new App ( this.omm_consumer,
-					this.omm_pool,
-					this.omm_encoder, this.omm_encoder2,
-					analytic.getService(),
+			app = new App ( analytic.getService(),
 					analytic.getApp(),
 					this.config.hasUuid() ? this.config.getUuid() : "",
 					this.config.hasPassword() ? this.config.getPassword() : "");
 			this.apps.put (analytic.getApp(), app);
-			app.sendConnectionRequest();
+			if (!this.is_muted) {
+				app.sendConnectionRequest();
+			}
 		}
 /* TBD: no stream de-duplication */
 		app.createItemStream (stream);
@@ -1781,11 +1875,20 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 	}
 
 	public boolean Resubscribe (Channel c) {
+		LOG.debug ("Resubscribe");
 		if (this.is_muted) {
 			LOG.debug ("Cancelling item resubscription due to pending session.");
 			return true;
 		}
 
+/* private streams for apps */
+		for (App app : this.apps.values()) {
+			if (!app.hasConnectionHandle()) {
+				app.sendConnectionRequest();
+			}
+		}
+
+/* individual item streams */
 		for (ItemStream item_stream : this.directory) {
 			if (-1 == item_stream.token) {
 				this.sendItemRequest (c, item_stream);
@@ -1908,6 +2011,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			return false;
 		}
 		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		it.clear();
 		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
@@ -1938,6 +2042,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 
 	private boolean OnMsg (Channel c, TransportBuffer buf) {
 		final DecodeIterator it = CodecFactory.createDecodeIterator();
+		it.clear();
 		final Msg msg = CodecFactory.createMsg();
 
 /* Prepare codec */
@@ -1964,11 +2069,32 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 				} else {
 					LOG.debug ("Msg.ValidateMsg success.");
 				}
-				LOG.debug ("{}", msg);
+/*				final DecodeIterator jt = CodecFactory.createDecodeIterator();
+				jt.clear();
+				rc = jt.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.error ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+					return false;
+				}
+				LOG.debug ("{}", msg.decodeToXml (jt)); */
 			}
 			if (!this.OnMsg (c, it, msg))
 				this.Abort (c);
 			return true;
+		}
+	}
+
+	private String DecodeToXml (Msg msg, int major_version, int minor_version) {
+		final DecodeIterator it = CodecFactory.createDecodeIterator();
+		it.clear();
+		final int rc = it.setBufferAndRWFVersion (msg.encodedMsgBuffer(), major_version, minor_version);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return "";
+		} else {
+			return msg.decodeToXml (it);
 		}
 	}
 
@@ -1983,7 +2109,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		case DomainTypes.DICTIONARY:
 			return this.OnDictionary (c, it, msg);
 		default:
-			LOG.warn ("Uncaught message: {}", msg);
+			LOG.warn ("Uncaught message: {}", this.DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			return true;
 		}
 	}
@@ -2333,6 +2459,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		request.containerType (DataTypes.NO_DATA);
 /* Set the login token. */
 		request.streamId (this.login_token = this.token++);
+LOG.debug ("login token {}", this.login_token);
 
 /* DACS username (required). */
 		request.msgKey().nameType (Login.UserIdTypes.NAME);
@@ -2354,6 +2481,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			return false;
 		}
 		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		it.clear();
 		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
@@ -2503,6 +2631,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		request.containerType (DataTypes.NO_DATA);
 /* Set the directory token. */
 		request.streamId (this.token);	/* login + 1 */
+LOG.debug ("directory token {}", this.token);
 
 /* In RFA lingo an attribute object, TBD: group, load filters. */
 		request.msgKey().filter (Directory.ServiceFilterFlags.INFO	// service names
@@ -2518,6 +2647,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			return false;
 		}
 		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		it.clear();
 		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
@@ -2565,6 +2695,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 		request.containerType (DataTypes.NO_DATA);
 /* Set the dictionary token. */
 		request.streamId (this.token);
+LOG.debug ("dictionary token {}", this.token);
 
 /* In RFA lingo an attribute object. */
 		request.msgKey().serviceId (service_id);
@@ -2584,6 +2715,7 @@ LOG.trace ("key 0 = {}", this.selector.keys().iterator().next().channel());
 			return false;
 		}
 		final EncodeIterator it = CodecFactory.createEncodeIterator();
+		it.clear();
 		int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",

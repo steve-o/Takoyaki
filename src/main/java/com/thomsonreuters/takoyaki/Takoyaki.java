@@ -327,6 +327,17 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			return false;
 		}
 
+/* FIXME: preload analytic */
+		final Analytic analytic = new Analytic ("ELEKTRON_AUX_TEST", "History", "tas", "FB.O");
+		try {
+			final Interval interval = Interval.parse ("2015-06-11T05:00:00.000Z/P5D");
+			analytic.setInterval (interval);
+		} catch (IllegalArgumentException e) {
+			LOG.catching (e);
+		}
+		final AnalyticStream stream = new AnalyticStream (this, "<identity001>");
+		this.analytic_consumer.createAnalyticStream (analytic, stream);
+
 /* HTTP server */
 		this.http_server = HttpServer.create (new InetSocketAddress (this.config.getHostAndPort().getPort()), 0);
 		this.http_handler = new MyHandler (this.zmq_context);
