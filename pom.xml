@@ -128,7 +128,7 @@
       <artifactId>upaValueAdd</artifactId>
       <version>8.0.0</version>
       <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/upaj8.0.0.L1.all.rrg/ValueAdd/Libs/upaValueAdd.jar</systemPath>
+      <systemPath>${project.basedir}/third_party/upaj8.0.0.L1.all.rrg/ValueAdd/Source/bin/upaValueAdd.jar</systemPath>
     </dependency>
     <dependency>
       <groupId>com.reuters.rfa</groupId>

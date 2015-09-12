@@ -124,6 +124,7 @@ import com.thomsonreuters.upa.codec.MsgKeyFlags;
 import com.thomsonreuters.upa.codec.RequestMsg;
 import com.thomsonreuters.upa.codec.RequestMsgFlags;
 import com.thomsonreuters.upa.codec.State;
+import com.thomsonreuters.upa.codec.StateCodes;
 import com.thomsonreuters.upa.codec.StreamStates;
 import com.thomsonreuters.upa.rdm.Dictionary;
 import com.thomsonreuters.upa.rdm.Directory;
@@ -267,7 +268,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 		private LinkedHashMap<Integer, AnalyticStream> stream_map;
 		private int stream_id;
 		private boolean pending_connection;	/* to app */
-		private ResponseStatus closed_response_status;
+		private State closed_response_status;
 		private ItemStream private_stream;
 
 		public App (String service_name, String app_name, String uuid, String password) {
@@ -281,7 +282,13 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 			this.private_stream.setServiceName (service_name);
 			this.setPendingConnection();
 // Appears until infrastructure returns new close status to present.
-			this.closed_response_status = new ResponseStatus (OMMState.Stream.CLOSED, OMMState.Data.SUSPECT, OMMState.Code.NO_RESOURCES, "No service private stream available to process the request.");
+			this.closed_response_status = CodecFactory.createState();
+			this.closed_response_status.code (StateCodes.NO_RESOURCES);
+			this.closed_response_status.dataState (DataStates.SUSPECT);
+			this.closed_response_status.streamState (StreamStates.CLOSED);
+			final Buffer text = CodecFactory.createBuffer();
+			text.data ("No service private stream available to process the request.");
+			this.closed_response_status.text (text);
 		}
 
 		private boolean CreatePrivateStream (Channel c) {
@@ -680,13 +687,25 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
 				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
 				stream.clearTimerHandle();
 			} else if (stream.getRetryCount() >= retry_limit) {
-				this.OnAnalyticsStatus (new ResponseStatus (OMMState.Stream.OPEN, OMMState.Data.SUSPECT, OMMState.Code.NONE, "Source did not respond."),
+				final State state = CodecFactory.createState();
+				state.streamState (StreamStates.OPEN);
+				state.dataState (DataStates.SUSPECT);
+				final Buffer text = CodecFactory.createBuffer();
+				text.data ("Source did not respond.");
+				state.text (text);
+				this.OnAnalyticsStatus (state,
 							stream,
 							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 /* prevent repeated invocation */
 				stream.clearTimerHandle();
 			} else {
-				this.OnAnalyticsStatus (new ResponseStatus (OMMState.Stream.OPEN, OMMState.Data.SUSPECT, OMMState.Code.NONE, "Source did not respond.  Retrying."),
+				final State state = CodecFactory.createState();
+				state.streamState (StreamStates.OPEN);
+				state.dataState (DataStates.SUSPECT);
+				final Buffer text = CodecFactory.createBuffer();
+				text.data ("Source did not respond.  Retrying.");
+				state.text (text);
+				this.OnAnalyticsStatus (state,
 							stream,
 							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 				stream.incrementRetryCount();
@@ -980,7 +999,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 			return true;
 		}
 
-		private void OnAnalyticsStatus (ResponseStatus response_status, AnalyticStream stream, int response_code) {
+		private void OnAnalyticsStatus (State response_status, AnalyticStream stream, int response_code) {
 /* Defer to GSON to escape status text. */
 			LogMessage log_msg = new LogMessage (
 				"STATUS",
@@ -988,10 +1007,10 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				stream.getAppName(),
 				stream.getItemName(),
 				stream.getQuery(),
-				OMMState.Stream.toString (response_status.getStreamState()),
-				OMMState.Data.toString (response_status.getDataState()),
-				OMMState.Code.toString (response_status.getCode()),
-				response_status.getText());
+				StreamStates.toString (response_status.streamState()),
+				DataStates.toString (response_status.dataState()),
+				StateCodes.toString (response_status.code()),
+				response_status.text().toString());
 			if (HttpURLConnection.HTTP_UNAVAILABLE == response_code) {
 /* for SBUX.N response.GetInstrumentDataAsXmlResult->error:  description: Host: NYCSCR03, error: UnknownInstrument errorCode: TAS__ErrorCode__TSIError errorCode: 1 */
 				if (log_msg.text.contains ("error: UnknownInstrument")) {
@@ -1130,9 +1149,9 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 					return;
 				}
 
-				this.OnAnalyticsStatus (new ResponseStatus (msg.getState()),
-							stream,
-							HttpURLConnection.HTTP_UNAVAILABLE);
+//				this.OnAnalyticsStatus (msg.state(),
+//							stream,
+//							HttpURLConnection.HTTP_UNAVAILABLE);
 				return;
 			}
 			else {
@@ -1225,44 +1244,70 @@ final FidDef fid_def = null;
 			if (LOG.isDebugEnabled()) {
 				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			}
-/*			final AppLoginResponse response = new AppLoginResponse (msg);
-			final byte stream_state = response.getRespStatus().getStreamState();
-			final byte data_state   = response.getRespStatus().getDataState();
+			final com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response = com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsgFactory.createMsg();
 
-			switch (stream_state) {
-			case OMMState.Stream.OPEN:
-				switch (data_state) {
-				case OMMState.Data.OK:
+			final int rc = response.decode (it, msg);
+			if (CodecReturnCodes.SUCCESS != rc) {
+/* NB: minimal error detail compared with UPA/C */
+				LOG.warn ("LoginMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc));
+				return false;
+			}
+
+/* extract out stream and data state like RFA */
+			final State state = CodecFactory.createState();
+			switch (msg.msgClass()) {
+			case MsgClasses.REFRESH:
+				state.streamState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginRefresh)response).state().streamState());
+				state.dataState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginRefresh)response).state().dataState());
+				break;
+
+			case MsgClasses.STATUS:
+				state.streamState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginStatus)response).state().streamState());
+				state.dataState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginStatus)response).state().dataState());
+				break;
+
+			case MsgClasses.CLOSE:
+				state.streamState (StreamStates.CLOSED);
+
+			default:
+				LOG.warn ("Uncaught: {}", msg);
+			}
+
+			switch (state.streamState()) {
+			case StreamStates.OPEN:
+				switch (state.dataState()) {
+				case DataStates.OK:
 					this.OnAppSuccess (response);
 					break;
 
-				case OMMState.Data.SUSPECT:
+				case DataStates.SUSPECT:
 					this.OnAppSuspect (response);
 					break;
 
 				default:
-					LOG.trace ("Uncaught data state: {}", response.getRespStatus());
+					LOG.trace ("Uncaught data state: {}", state);
 					break;
 				}
-				break; */
+				break;
 
 /* CLOSED is supposed to be a terminal status like something is not found or entitled.
  * CLOSED_RECOVER is a transient problem that the consumer should attempt recovery such as 
  * out of resources and thus unenable to store the request.
  */
-/*			case OMMState.Stream.CLOSED:
-			case OMMState.Stream.CLOSED_RECOVER:
+			case StreamStates.CLOSED:
+			case StreamStates.CLOSED_RECOVER:
 				this.OnAppClosed (response);
 				break;
 
 			default:
-				LOG.trace ("Uncaught stream state: {}", response.getRespStatus());
+				LOG.trace ("Uncaught stream state: {}", state);
 				break;
-			} */
+			}
 			return true;
 		}
 
-		private void OnAppSuccess (AppLoginResponse response) {
+		private void OnAppSuccess (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
 			LOG.trace ("OnAppSuccess: {}", response);
 			this.clearPendingConnection();
 			LOG.trace ("Resubmitting analytics.");
@@ -1272,11 +1317,11 @@ final FidDef fid_def = null;
 		}
 
 /* Transient problem, TREP will attempt to recover automatically */
-		private void OnAppSuspect (AppLoginResponse response) {
+		private void OnAppSuspect (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
 			LOG.trace ("OnAppSuspect: {}", response);
 		}
 
-		private void OnAppClosed (AppLoginResponse response) {
+		private void OnAppClosed (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
 			LOG.trace ("OnAppClosed: {}", response);
 			this.setPendingConnection();
 /* Invalidate all existing identifiers */
@@ -1284,14 +1329,14 @@ final FidDef fid_def = null;
 /* Prevent attempts to send a close request */
 				stream.close();
 /* Destroy for snapshots */
-				this.OnAnalyticsStatus (response.getRespStatus(),
-							stream,
-							HttpURLConnection.HTTP_UNAVAILABLE);
+//				this.OnAnalyticsStatus (response.state(),
+//							stream,
+//							HttpURLConnection.HTTP_UNAVAILABLE);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}
 /* Await timer to re-open private stream, cache close message until connected. */
-			this.closed_response_status = response.getRespStatus();
+//			this.closed_response_status = response.state();
 			this.private_stream = null;
 		}
 
@@ -2113,12 +2158,12 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	private boolean OnLoginResponse (Channel c, DecodeIterator it, Msg msg) {
 		final LoginMsg response = LoginMsgFactory.createMsg();
 
-		switch (msg.msgClass()) {
+/*		switch (msg.msgClass()) {
 		case MsgClasses.REFRESH:	response.rdmMsgType (LoginMsgType.REFRESH); break;
 		case MsgClasses.STATUS:		response.rdmMsgType (LoginMsgType.STATUS); break;
 		case MsgClasses.CLOSE:		response.rdmMsgType (LoginMsgType.CLOSE); break;
 		default: return false;
-		}
+		} */
 		final int rc = response.decode (it, msg);
 		if (CodecReturnCodes.SUCCESS != rc) {
 /* NB: minimal error detail compared with UPA/C */
@@ -2178,13 +2223,13 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	private boolean OnDirectory (Channel c, DecodeIterator it, Msg msg) {
 		final DirectoryMsg response = DirectoryMsgFactory.createMsg();
 
-		switch (msg.msgClass()) {
+/*		switch (msg.msgClass()) {
 		case MsgClasses.REFRESH:	response.rdmMsgType (DirectoryMsgType.REFRESH); break;
 		case MsgClasses.UPDATE:		response.rdmMsgType (DirectoryMsgType.UPDATE); break;
 		case MsgClasses.STATUS:		response.rdmMsgType (DirectoryMsgType.STATUS); break;
 		case MsgClasses.CLOSE:		response.rdmMsgType (DirectoryMsgType.CLOSE); break;
 		default: return false;
-		}
+		} */
 		final int rc = response.decode (it, msg);
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.warn ("DirectoryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
@@ -2258,12 +2303,12 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 
 		LOG.debug ("OnDictionary");
 
-		switch (msg.msgClass()) {
+/*		switch (msg.msgClass()) {
 		case MsgClasses.REFRESH:	response.rdmMsgType (DictionaryMsgType.REFRESH); break;
 		case MsgClasses.STATUS:		response.rdmMsgType (DictionaryMsgType.STATUS); break;
 		case MsgClasses.CLOSE:		response.rdmMsgType (DictionaryMsgType.CLOSE); break;
 		default: return false;
-		}
+		} */
 		final int rc = response.decode (it, msg);
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.warn ("DictionaryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
