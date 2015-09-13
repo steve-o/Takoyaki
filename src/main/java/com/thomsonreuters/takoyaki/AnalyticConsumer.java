@@ -30,6 +30,7 @@ import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
@@ -120,6 +121,10 @@ import com.thomsonreuters.upa.codec.ElementEntry;
 import com.thomsonreuters.upa.codec.ElementList;
 import com.thomsonreuters.upa.codec.ElementListFlags;
 import com.thomsonreuters.upa.codec.EncodeIterator;
+import com.thomsonreuters.upa.codec.FilterEntry;
+import com.thomsonreuters.upa.codec.FilterEntryActions;
+import com.thomsonreuters.upa.codec.FilterList;
+import com.thomsonreuters.upa.codec.MapEntryActions;
 import com.thomsonreuters.upa.codec.Msg;
 import com.thomsonreuters.upa.codec.MsgClasses;
 import com.thomsonreuters.upa.codec.MsgKey;
@@ -133,6 +138,8 @@ import com.thomsonreuters.upa.codec.StateCodes;
 import com.thomsonreuters.upa.codec.StatusMsg;
 import com.thomsonreuters.upa.codec.StatusMsgFlags;
 import com.thomsonreuters.upa.codec.StreamStates;
+import com.thomsonreuters.upa.codec.UpdateMsg;
+import com.thomsonreuters.upa.codec.UpdateMsgFlags;
 import com.thomsonreuters.upa.rdm.Dictionary;
 import com.thomsonreuters.upa.rdm.Directory;
 import com.thomsonreuters.upa.rdm.DomainTypes;
@@ -216,7 +223,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 	private Map<Integer, ItemStream> tokens;
 
 /* Service name to id map  */
-	private ImmutableMap<String, Integer> service_map;
+	private ImmutableBiMap<String, Integer> service_map;
 
 /* incrementing unique id for streams */
 	int token;
@@ -2210,44 +2217,103 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	}
 
 	private boolean OnDirectory (Channel c, DecodeIterator it, Msg msg) {
-		final DirectoryMsg response = DirectoryMsgFactory.createMsg();
-
-/*		switch (msg.msgClass()) {
-		case MsgClasses.REFRESH:	response.rdmMsgType (DirectoryMsgType.REFRESH); break;
-		case MsgClasses.UPDATE:		response.rdmMsgType (DirectoryMsgType.UPDATE); break;
-		case MsgClasses.STATUS:		response.rdmMsgType (DirectoryMsgType.STATUS); break;
-		case MsgClasses.CLOSE:		response.rdmMsgType (DirectoryMsgType.CLOSE); break;
-		default: return false;
-		} */
-		final int rc = response.decode (it, msg);
-		if (CodecReturnCodes.SUCCESS != rc) {
-			LOG.warn ("DirectoryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
-				rc, CodecReturnCodes.toString (rc));
-			return false;
-		}
-
-		switch (response.rdmMsgType()) {
-		case REFRESH:
-			return this.OnDirectoryRefresh (c, (DirectoryRefresh)response);
-		case UPDATE:
-			return this.OnDirectoryUpdate (c, (DirectoryUpdate)response);
-
-		case CLOSE:
-		case STATUS:
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:
+			return this.OnDirectoryRefresh (c, it, (RefreshMsg)msg);
+		case MsgClasses.UPDATE:
+			return this.OnDirectoryUpdate (c, it, (UpdateMsg)msg);
 		default:
 			LOG.warn ("Uncaught directory response message type: {}", msg);
-			return true;
+			return false;
 		}
 	}
 
 	static final String FIELD_DICTIONARY_NAME = "RWFFld";
 	static final String ENUM_TYPE_DICTIONARY_NAME = "RWFEnum";
 
-	private boolean OnDirectoryRefresh (Channel c, DirectoryRefresh response) {
+	private boolean OnDirectoryRefresh (Channel c, DecodeIterator it, RefreshMsg response) {
 		LOG.debug ("OnDirectoryRefresh");
-		final ImmutableMap.Builder<String, Integer> builder = ImmutableMap.builder();
-		for (final Service service : response.serviceList()) {
-			builder.put (service.info().serviceName().toString(), service.serviceId());
+		if (DataTypes.MAP != response.containerType()) {
+			LOG.warn ("Directory refresh container type unexpected.");
+			return false;
+		}
+		final com.thomsonreuters.upa.codec.Map map = CodecFactory.createMap();
+		int rc = map.decode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("Map.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
+		}
+		if (DataTypes.FILTER_LIST != map.containerType()) {
+			LOG.warn ("Map container type unexpected.");
+			return false;
+		}
+		if (DataTypes.UINT != map.keyPrimitiveType()) {
+			LOG.warn ("Map key primitive type unexpected.");
+			return false;
+		}
+		final com.thomsonreuters.upa.codec.MapEntry map_entry = CodecFactory.createMapEntry();
+		final com.thomsonreuters.upa.codec.UInt rssl_uint = CodecFactory.createUInt();
+		final FilterList filter_list = CodecFactory.createFilterList();
+		final FilterEntry filter_entry = CodecFactory.createFilterEntry();
+		final ElementList element_list = CodecFactory.createElementList();
+		final ElementEntry element_entry = CodecFactory.createElementEntry();
+		final ImmutableBiMap.Builder<String, Integer> builder = ImmutableBiMap.builder();
+		for (;;) {
+			rc = map_entry.decode (it, rssl_uint);
+			if (CodecReturnCodes.END_OF_CONTAINER == rc)
+				break;
+			if (CodecReturnCodes.BLANK_DATA == rc)
+				continue;
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.warn ("MapEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc));
+				return false;
+			}
+			final int service_id = (int)rssl_uint.toLong();
+/* refresh should never include a DELETE but the example code handles this case. */
+			if (MapEntryActions.DELETE != map_entry.action()) {
+				rc = filter_list.decode (it);
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.warn ("FilterList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc));
+					return false;
+				}
+				for (;;) {
+					rc = filter_entry.decode (it);
+					if (CodecReturnCodes.END_OF_CONTAINER == rc)
+						break;
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("FilterEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+/* absolute minimum of service name and id */
+					if (Directory.ServiceFilterIds.INFO != filter_entry.id())
+						continue;
+					rc = element_list.decode (it, null /* local definitions */);
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("ElementList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+					for (;;) {
+						rc = element_entry.decode (it);
+						if (CodecReturnCodes.END_OF_CONTAINER == rc)
+							break;
+						if (CodecReturnCodes.SUCCESS != rc) {
+							LOG.warn ("ElementEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+								rc, CodecReturnCodes.toString (rc));
+							return false;
+						}
+						if (element_entry.name().equals (ElementNames.NAME)) {
+							final Buffer rssl_buffer = element_entry.encodedData();
+							builder.put (rssl_buffer.toString(), service_id);
+							LOG.trace ("Service {} applied to map with action {}.", service_id, filter_entry.action());
+						}
+					}
+				}
+			}
 		}
 		this.service_map = builder.build();
 
@@ -2259,7 +2325,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 				LOG.warn ("Upstream provider has no configured services, unable to request a dictionary.");
 				return true;
 			}
-			final int service_id = response.serviceList().iterator().next().serviceId();
+			final int service_id = this.service_map.values().iterator().next();
 /* Hard code to RDM dictionary for TREP deployment. */
 			if (!this.SendDictionaryRequest (c, service_id, FIELD_DICTIONARY_NAME))
 				return false;
@@ -2270,20 +2336,110 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		return this.Resubscribe (c);
 	}
 
-	private boolean OnDirectoryUpdate (Channel c, DirectoryUpdate response) {
+	private boolean OnDirectoryUpdate (Channel c, DecodeIterator it, UpdateMsg response) {
 		LOG.debug ("OnDirectoryUpdate");
-/* new map = old map - update services + updated services */
-		final ImmutableMap.Builder<String, Integer> builder = ImmutableMap.builder();
-		final Set<String> changed = Sets.newTreeSet();
-		for (final Service service : response.serviceList()) {
-			builder.put (service.info().serviceName().toString(), service.serviceId());
-			changed.add (service.info().serviceName().toString());
+		if (DataTypes.MAP != response.containerType()) {
+			LOG.warn ("Directory update container type unexpected.");
+			return false;
 		}
-		final Sets.SetView<String> unchanged = Sets.difference (this.service_map.keySet(), changed);
-		for (final String service : unchanged) {
-			builder.put (service, this.service_map.get (service));
+		final com.thomsonreuters.upa.codec.Map map = CodecFactory.createMap();
+		int rc = map.decode (it);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("Map.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return false;
 		}
-		this.service_map = builder.build();
+		if (DataTypes.FILTER_LIST != map.containerType()) {
+			LOG.warn ("Map container type unexpected.");
+			return false;
+		}
+		if (DataTypes.UINT != map.keyPrimitiveType()) {
+			LOG.warn ("Map key primitive type unexpected.");
+			return false;
+		}
+		final com.thomsonreuters.upa.codec.MapEntry map_entry = CodecFactory.createMapEntry();
+		final com.thomsonreuters.upa.codec.UInt rssl_uint = CodecFactory.createUInt();
+		final FilterList filter_list = CodecFactory.createFilterList();
+		final FilterEntry filter_entry = CodecFactory.createFilterEntry();
+		final ElementList element_list = CodecFactory.createElementList();
+		final ElementEntry element_entry = CodecFactory.createElementEntry();
+		final TreeMap<String,Integer> new_map = new TreeMap<>();
+		new_map.putAll (this.service_map);
+		for (;;) {
+			rc = map_entry.decode (it, rssl_uint);
+			if (CodecReturnCodes.END_OF_CONTAINER == rc)
+				break;
+			if (CodecReturnCodes.BLANK_DATA == rc)
+				continue;
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.warn ("Ma@Entry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc));
+				return false;
+			}
+			final int service_id = (int)rssl_uint.toLong();
+			switch (map_entry.action()) {
+			case MapEntryActions.DELETE:
+				LOG.trace ("Removing service id {}", service_id);
+				new_map.remove (this.service_map.inverse().get (service_id));
+				break;
+
+			case MapEntryActions.ADD:
+			case MapEntryActions.UPDATE:
+				rc = filter_list.decode (it);
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.warn ("FilterList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc));
+					return false;
+				}
+				for (;;) {
+					rc = filter_entry.decode (it);
+					if (CodecReturnCodes.END_OF_CONTAINER == rc)
+						break;
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("FilterEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+/* absolute minimum of service name and id */
+					if (Directory.ServiceFilterIds.INFO != filter_entry.id())
+						continue;
+					rc = element_list.decode (it, null /* local definitions */);
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("ElementList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+					for (;;) {
+						rc = element_entry.decode (it);
+						if (CodecReturnCodes.END_OF_CONTAINER == rc)
+							break;
+						if (CodecReturnCodes.SUCCESS != rc) {
+							LOG.warn ("ElementEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+								rc, CodecReturnCodes.toString (rc));
+							return false;
+						}
+						if (element_entry.name().equals (ElementNames.NAME)) {
+							final Buffer rssl_buffer = element_entry.encodedData();
+							switch (filter_entry.action()) {
+							case FilterEntryActions.SET:
+							case FilterEntryActions.UPDATE:
+								LOG.trace ("Service {} applied to map with action {}.", service_id, filter_entry.action());
+								new_map.put (rssl_buffer.toString(), service_id);
+								break;
+							case FilterEntryActions.CLEAR:
+								LOG.trace ("Removing service {} due to CLEAR filter entry action.", service_id);
+								new_map.remove (this.service_map.inverse().get (service_id));
+								break;
+							default:
+								LOG.warn ("Unexpected filter entry action.");
+								return false;
+							}
+						}
+					}
+				}
+			}
+		}
+		this.service_map = ImmutableBiMap.copyOf (new_map);
 		return this.Resubscribe (c);
 	}
 
@@ -2385,10 +2541,12 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 					final ElementEntry element_entry = CodecFactory.createElementEntry();
 					for (;;) {
 						rc = element_entry.decode (it);
-						if (CodecReturnCodes.END_OF_CONTAINER == rc
-							|| CodecReturnCodes.SUCCESS != rc)
-						{
+						if (CodecReturnCodes.END_OF_CONTAINER == rc)
 							break;
+						if (CodecReturnCodes.SUCCESS != rc) {
+							LOG.warn ("ElementEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+								rc, CodecReturnCodes.toString (rc));
+							return false;
 						}
 						if (element_entry.name().equals (ElementNames.APPNAME)) {
 							if (DataTypes.ASCII_STRING != element_entry.dataType()) {
