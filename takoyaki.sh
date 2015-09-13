@@ -40,7 +40,7 @@ RFAVALUEADD=ValueAdd_DomainRep.jar
 
 # Thomson Reuters UPA
 UPA=upa.jar
-UPAVALUEADD=upaValueAdd.jar
+UPAVALUEADD=
 
 # ZeroMQ
 ZMQ=jeromq-0.3.2.jar

@@ -163,23 +163,6 @@ import com.thomsonreuters.upa.transport.TransportReturnCodes;
 import com.thomsonreuters.upa.transport.WriteArgs;
 import com.thomsonreuters.upa.transport.WriteFlags;
 import com.thomsonreuters.upa.transport.WritePriorities;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsg;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsgFactory;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryMsgType;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryRefresh;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.dictionary.DictionaryRefreshFlags;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsg;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsgFactory;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryMsgType;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryRefresh;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.DirectoryUpdate;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.directory.Service;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginAttribFlags;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsg;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsgFactory;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginMsgType;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginRefresh;
-import com.thomsonreuters.upa.valueadd.domainrep.rdm.login.LoginStatus;
 
 public class AnalyticConsumer implements ItemStream.Delegate {
 	private static Logger LOG = LogManager.getLogger (AnalyticConsumer.class.getName());
