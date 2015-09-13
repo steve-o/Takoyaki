@@ -282,6 +282,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 		private LinkedHashMap<Integer, AnalyticStream> stream_map;
 		private int stream_id;
 		private boolean pending_connection;	/* to app */
+		private final State default_closed_response_status;
 		private State closed_response_status;
 		private ItemStream private_stream;
 
@@ -293,16 +294,18 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
 			this.private_stream = new ItemStream (this);
+			this.private_stream.token = 0;
 			this.private_stream.setServiceName (service_name);
 			this.setPendingConnection();
 // Appears until infrastructure returns new close status to present.
-			this.closed_response_status = CodecFactory.createState();
-			this.closed_response_status.code (StateCodes.NO_RESOURCES);
-			this.closed_response_status.dataState (DataStates.SUSPECT);
-			this.closed_response_status.streamState (StreamStates.CLOSED);
+			this.default_closed_response_status = CodecFactory.createState();
+			this.default_closed_response_status.code (StateCodes.NO_RESOURCES);
+			this.default_closed_response_status.dataState (DataStates.SUSPECT);
+			this.default_closed_response_status.streamState (StreamStates.CLOSED);
 			final Buffer text = CodecFactory.createBuffer();
-			text.data ("No service private stream available to process the request.");
-			this.closed_response_status.text (text);
+			text.data ("No private stream available to process the request.");
+			this.default_closed_response_status.text (text);
+			this.closed_response_status = this.default_closed_response_status;
 		}
 
 		private boolean CreatePrivateStream (Channel c) {
@@ -317,9 +320,9 @@ request.domainType (DomainTypes.HISTORY);
 			request.flags (RequestMsgFlags.STREAMING | RequestMsgFlags.PRIVATE_STREAM);
 /* No view thus no payload. */
 			request.containerType (DataTypes.NO_DATA);
-/* Set the stream token. */
-			request.streamId (token);
-LOG.debug ("private stream token {}", token);
+/* Set the stream token, recycle for closed a stream. */
+			request.streamId (this.private_stream.token == 0 ? token : this.private_stream.token);
+LOG.debug ("private stream token {}", this.private_stream.token == 0 ? token : this.private_stream.token);
 
 /* In RFA lingo an attribute object */
 			request.msgKey().name().data (this.uuid);
@@ -436,11 +439,11 @@ request.qos().timeInfo (0);
 
 			if (0 == Submit (c, buf)) {
 				return false;
-			} else {
+			} else if (0 == this.private_stream.token) {
 				this.private_stream.token = token++;
 				tokens.put (this.private_stream.token, this.private_stream);
-				return true;
 			}
+			return true;
 		}
 
 		public void createItemStream (AnalyticStream stream) {
@@ -1258,52 +1261,39 @@ final FidDef fid_def = null;
 			if (LOG.isDebugEnabled()) {
 				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			}
-			final com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response = com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsgFactory.createMsg();
 
-			final int rc = response.decode (it, msg);
-			if (CodecReturnCodes.SUCCESS != rc) {
-/* NB: minimal error detail compared with UPA/C */
-				LOG.warn ("LoginMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
-					rc, CodecReturnCodes.toString (rc));
-				return false;
-			}
-
-/* extract out stream and data state like RFA */
-			final State state = CodecFactory.createState();
+			State state = null;
 			switch (msg.msgClass()) {
-			case MsgClasses.REFRESH:
-				state.streamState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginRefresh)response).state().streamState());
-				state.dataState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginRefresh)response).state().dataState());
-				break;
-
-			case MsgClasses.STATUS:
-				state.streamState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginStatus)response).state().streamState());
-				state.dataState (((com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginStatus)response).state().dataState());
-				break;
-
 			case MsgClasses.CLOSE:
-				state.streamState (StreamStates.CLOSED);
-
+				return this.OnAppClosed (c, it, msg);
+			case MsgClasses.REFRESH:
+				state = ((RefreshMsg)msg).state();
+				break;
+			case MsgClasses.STATUS:
+				state = ((StatusMsg)msg).state();
+				break;
 			default:
 				LOG.warn ("Uncaught: {}", msg);
+				return true;
 			}
 
+			assert (null != state);
+
+/* extract out stream and data state like RFA */
 			switch (state.streamState()) {
 			case StreamStates.OPEN:
 				switch (state.dataState()) {
 				case DataStates.OK:
-					this.OnAppSuccess (response);
-					break;
-
+					return this.OnAppSuccess (c, it, msg);
 				case DataStates.SUSPECT:
-					this.OnAppSuspect (response);
-					break;
-
+					return this.OnAppSuspect (c, it, msg);
+				case DataStates.NO_CHANGE:
+// by-definition, ignore
+					return true;
 				default:
 					LOG.trace ("Uncaught data state: {}", state);
-					break;
+					return true;
 				}
-				break;
 
 /* CLOSED is supposed to be a terminal status like something is not found or entitled.
  * CLOSED_RECOVER is a transient problem that the consumer should attempt recovery such as 
@@ -1311,47 +1301,61 @@ final FidDef fid_def = null;
  */
 			case StreamStates.CLOSED:
 			case StreamStates.CLOSED_RECOVER:
-				this.OnAppClosed (response);
-				break;
+				return this.OnAppClosed (c, it, msg);
 
 			default:
 				LOG.trace ("Uncaught stream state: {}", state);
-				break;
+				return true;
 			}
-			return true;
 		}
 
-		private void OnAppSuccess (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
-			LOG.trace ("OnAppSuccess: {}", response);
+		private boolean OnAppSuccess (Channel c, DecodeIterator it, Msg msg) {
+			LOG.trace ("OnAppSuccess: {}", msg);
 			this.clearPendingConnection();
 			LOG.trace ("Resubmitting analytics.");
 /* Renumber all managed stream ids */
 			this.resetStreamId();
 			this.resubmit();
+			return true;
 		}
 
 /* Transient problem, TREP will attempt to recover automatically */
-		private void OnAppSuspect (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
-			LOG.trace ("OnAppSuspect: {}", response);
+		private boolean OnAppSuspect (Channel c, DecodeIterator it, Msg msg) {
+			LOG.trace ("OnAppSuspect: {}", msg);
+			return true;
 		}
 
-		private void OnAppClosed (com.thomsonreuters.upa.valueadd.domainrep.app.login.LoginMsg response) {
-			LOG.trace ("OnAppClosed: {}", response);
+		private boolean OnAppClosed (Channel c, DecodeIterator it, Msg msg) {
+			LOG.trace ("OnAppClosed: {}", msg);
 			this.setPendingConnection();
+/* Save state for future requests, generate one for message with no state field. */
+			switch (msg.msgClass()) {
+			case MsgClasses.CLOSE:
+				this.closed_response_status = this.default_closed_response_status;
+				break;
+			case MsgClasses.REFRESH:
+				this.closed_response_status = ((RefreshMsg)msg).state();
+				break;
+			case MsgClasses.STATUS:
+				this.closed_response_status = ((StatusMsg)msg).state();
+				break;
+			default:
+				LOG.warn ("Unhandled msgClass.");
+				return false;
+			}
 /* Invalidate all existing identifiers */
 			for (AnalyticStream stream : this.streams) {
 /* Prevent attempts to send a close request */
 				stream.close();
 /* Destroy for snapshots */
-//				this.OnAnalyticsStatus (response.state(),
-//							stream,
-//							HttpURLConnection.HTTP_UNAVAILABLE);
+				this.OnAnalyticsStatus (this.closed_response_status,
+							stream,
+							HttpURLConnection.HTTP_UNAVAILABLE);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}
 /* Await timer to re-open private stream, cache close message until connected. */
-//			this.closed_response_status = response.state();
-			this.private_stream = null;
+			return true;
 		}
 
 		private int acquireStreamId() {
