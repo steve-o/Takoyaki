@@ -116,6 +116,7 @@ import com.thomsonreuters.upa.codec.CodecReturnCodes;
 import com.thomsonreuters.upa.codec.DataDictionary;
 import com.thomsonreuters.upa.codec.DataStates;
 import com.thomsonreuters.upa.codec.DataTypes;
+import com.thomsonreuters.upa.codec.DictionaryEntry;
 import com.thomsonreuters.upa.codec.DecodeIterator;
 import com.thomsonreuters.upa.codec.ElementEntry;
 import com.thomsonreuters.upa.codec.ElementList;
@@ -129,6 +130,7 @@ import com.thomsonreuters.upa.codec.FilterEntryActions;
 import com.thomsonreuters.upa.codec.FilterList;
 import com.thomsonreuters.upa.codec.GenericMsg;
 import com.thomsonreuters.upa.codec.GenericMsgFlags;
+import com.thomsonreuters.upa.codec.LocalFieldSetDefDb;
 import com.thomsonreuters.upa.codec.MapEntryActions;
 import com.thomsonreuters.upa.codec.Msg;
 import com.thomsonreuters.upa.codec.MsgClasses;
@@ -138,6 +140,9 @@ import com.thomsonreuters.upa.codec.RefreshMsg;
 import com.thomsonreuters.upa.codec.RefreshMsgFlags;
 import com.thomsonreuters.upa.codec.RequestMsg;
 import com.thomsonreuters.upa.codec.RequestMsgFlags;
+import com.thomsonreuters.upa.codec.Series;
+import com.thomsonreuters.upa.codec.SeriesEntry;
+import com.thomsonreuters.upa.codec.SeriesFlags;
 import com.thomsonreuters.upa.codec.State;
 import com.thomsonreuters.upa.codec.StateCodes;
 import com.thomsonreuters.upa.codec.StatusMsg;
@@ -191,7 +196,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 
 /* RFA OMM consumer interface. */
 	private OMMConsumer omm_consumer;
-        private OMMPool omm_pool;
+	private OMMPool omm_pool;
 	private OMMEncoder omm_encoder, omm_encoder2;
 
 	private Set<Integer> field_set;
@@ -561,7 +566,7 @@ request.qos().timeInfo (0);
 			final com.thomsonreuters.upa.codec.Int rssl_int = CodecFactory.createInt();
 			field_list.flags (FieldListFlags.HAS_STANDARD_DATA | FieldListFlags.HAS_FIELD_LIST_INFO);
 			field_list.dictionaryId (1 /* RDMFieldDictionary */);
-			field_list.fieldListNum (0 /* record template number */);
+			field_list.fieldListNum (5 /* record template number */);
 			rc = field_list.encodeInit (it, null /* local dictionary */, 0 /* size hint */);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.error ("FieldList.encodeInit: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"flags\": \"HAS_STANDARD_DATA|HAS_FIELD_LIST_INFO\", \"dictionaryId\": {}, \"fieldListNum\": {} }",
@@ -732,36 +737,13 @@ request.qos().timeInfo (0);
 
 		@Override
 		public boolean OnMsg (Channel c, DecodeIterator it, Msg msg) {
-			switch (msg.domainType()) {
-/* FIXME: DomainTypes.SYSTEM */
-			case DomainTypes.HISTORY:
-				return this.OnSystem (c, it, msg);
-			default:
-				LOG.warn ("Uncaught message: {}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
-				return true;
-			}
-		}
-
-		private void OnOMMItemEvent (OMMItemEvent event) {
-			LOG.trace ("OnOMMItemEvent: {}", event);
-			final OMMMsg msg = event.getMsg();
-
-			switch (msg.getMsgType()) {
-			case OMMMsg.MsgType.REFRESH_RESP:
-			case OMMMsg.MsgType.UPDATE_RESP:
-			case OMMMsg.MsgType.STATUS_RESP:
-			case OMMMsg.MsgType.ACK_RESP:
-				this.OnRespMsg (msg, event.getHandle(), event.getClosure());
-				break;
-
+			switch (msg.msgClass()) {
 /* inside stream messages */
-			case OMMMsg.MsgType.GENERIC:
-				this.OnGenericMsg (msg, event.getHandle(), event.getClosure());
-				break;
-			
+			case MsgClasses.GENERIC:
+				return this.OnGenericMsg (c, it, msg);
+/* private stream changes */
 			default:
-				LOG.trace ("Uncaught: {}", msg);
-				break;
+				return this.OnSystem (c, it, msg);
 			}
 		}
 
@@ -777,7 +759,7 @@ request.qos().timeInfo (0);
 			}
 /* no retry if private stream is not available */
 			if (this.pending_connection) {
-				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
+//				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
 				stream.clearTimerHandle();
 			} else if (stream.getRetryCount() >= retry_limit) {
 				final State state = CodecFactory.createState();
@@ -786,9 +768,9 @@ request.qos().timeInfo (0);
 				final Buffer text = CodecFactory.createBuffer();
 				text.data ("Source did not respond.");
 				state.text (text);
-				this.OnAnalyticsStatus (state,
-							stream,
-							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
+//				this.OnAnalyticsStatus (state,
+//							stream,
+//							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 /* prevent repeated invocation */
 				stream.clearTimerHandle();
 			} else {
@@ -798,82 +780,49 @@ request.qos().timeInfo (0);
 				final Buffer text = CodecFactory.createBuffer();
 				text.data ("Source did not respond.  Retrying.");
 				state.text (text);
-				this.OnAnalyticsStatus (state,
-							stream,
-							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
+//				this.OnAnalyticsStatus (state,
+//							stream,
+//							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 				stream.incrementRetryCount();
 				this.sendItemRequest (connection, stream);
 				this.registerRetryTimer (stream, retry_timer_ms);
 			}
 		}
 
-		private void OnRespMsg (OMMMsg msg, Handle handle, Object closure) {
-			LOG.trace ("OnRespMsg: {}", msg);
-			switch (msg.getMsgModelType()) {
-case 12 /* RDMMsgTypes.HISTORY */:
-case 30 /* RDMMsgTypes.ANALYTICS */:
-			case 127 /* RDMMsgTypes.SYSTEM */:
-//				this.OnAppResponse (msg, handle, closure);
-				break;
-
-			default:
-				LOG.trace ("Uncaught: {}", msg);
-				break;
-			}
-		}
-
-		private void OnGenericMsg (OMMMsg msg, Handle handle, Object closure) {
+/* encapsulated stream messages */
+		private boolean OnGenericMsg (Channel c, DecodeIterator it, Msg msg) {
 			LOG.trace ("OnGenericMsg: {}", msg);
-			if (LOG.isDebugEnabled()) {
-				ByteArrayOutputStream baos = new ByteArrayOutputStream();
-				PrintStream ps = new PrintStream (baos);
-				GenericOMMParser.parseMsg (msg, ps);
-				LOG.debug ("Generic message:{}{}", LINE_SEPARATOR, baos.toString());
-			}
-/* Forward all MMT_ANALYTICS encapsulated messages */
-			switch (msg.getMsgModelType()) {
-case 12 /* RDMMsgTypes.HISTORY */:
-case 30 /* RDMMsgTypes.ANALYTICS */:
-			case 127 /* RDMMsgTypes.SYSTEM */:
-				if (msg.getDataType() == OMMTypes.MSG) {
-					this.OnAnalyticsMsg ((OMMMsg)msg.getPayload(), handle, closure);
-					break;
-				}
+			switch (msg.domainType()) {
+			case DomainTypes.HISTORY:
+				return this.OnHistory (c, it, msg);
 
 			default:
 				LOG.trace ("Uncaught: {}", msg);
-				break;
+				return true;
 			}
 		}
 
-		private void OnAnalyticsMsg (OMMMsg msg, Handle handle, Object closure) {
-			LOG.trace ("OnAnalyticsMsg: {}", msg);
-
-			switch (msg.getMsgType()) {
-			case OMMMsg.MsgType.REFRESH_RESP:
-			case OMMMsg.MsgType.UPDATE_RESP:
-			case OMMMsg.MsgType.STATUS_RESP:
-			case OMMMsg.MsgType.ACK_RESP:
-				this.OnAnalyticsRespMsg (msg, handle, closure);
-				break;
-
-			default:
-				LOG.trace ("Uncaught: {}", msg);
-				break;
+		private boolean OnHistory (Channel c, DecodeIterator it, Msg msg) {
+			LOG.trace ("OnHistory: {}", msg);
+			if (DataTypes.MSG != msg.containerType()) {
+				LOG.warn ("Unexpected container type in HISTORY response.");
+				return false;
 			}
-		}
-
-		private void OnAnalyticsRespMsg (OMMMsg msg, Handle handle, Object closure) {
-			LOG.trace ("OnAnalyticsRespMsg: {}", msg);
-			switch (msg.getMsgModelType()) {
-			case 12 /* RDMMsgTypes.HISTORY */:
-			case 30 /* RDMMsgTypes.ANALYTICS */:
-				this.OnAnalyticsResponse (msg, handle, closure);
-				break;
-
+			final Msg encapsulated_msg = CodecFactory.createMsg();
+			int rc = encapsulated_msg.decode (it);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("Msg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			switch (encapsulated_msg.msgClass()) {
+			case MsgClasses.REFRESH:
+				return this.OnHistoryRefresh (c, it, (RefreshMsg)encapsulated_msg);
+			case MsgClasses.STATUS:
+				return this.OnHistoryStatus (c, it, (StatusMsg)encapsulated_msg);
 			default:
-				LOG.trace ("Uncaught: {}", msg);
-				break;
+				LOG.trace ("Uncaught: {}", encapsulated_msg);
+				return true;
 			}
 		}
 
@@ -925,129 +874,139 @@ case 30 /* RDMMsgTypes.ANALYTICS */:
 	}
 
 /* Elektron Time Series refresh */
-		private boolean OnHistoryResponse (OMMMsg msg, AnalyticStream stream) {
+		private boolean OnHistoryRefresh (Channel c, DecodeIterator it, RefreshMsg msg) {
 			LOG.trace ("OnHistoryResponse: {}", msg);
-			if (OMMTypes.SERIES != msg.getDataType()) {
-				LOG.trace ("Unsupported data type ({}) in OMM response.", msg.getDataType());
+			final AnalyticStream stream = this.stream_map.get (msg.streamId());
+			if (null == stream) {
+				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
+				return true;
+			}
+			if (DataTypes.SERIES != msg.containerType()) {
+				LOG.trace ("Unsupported data type {} in HISTORY refresh.", msg.containerType());
 				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
 				this.destroyItemStream (stream);
 				return false;
 			}
-
-	                final OMMSeries series = TEST_RWF15_TIME_ENCODING ? (OMMSeries)CreateTestMsg().getPayload() : (OMMSeries)msg.getPayload();
-
+			final Series series = CodecFactory.createSeries();
+			int rc = series.decode (it);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("Series.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			if (DataTypes.FIELD_LIST != series.containerType()) {
+				LOG.warn ("Unexpected data type {} in HISTORY refresh series.", series.containerType());
+				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
+				this.destroyItemStream (stream);
+				return false;
+			}
+/* response includes a dictionary to decode the series data */
+			final LocalFieldSetDefDb local_dictionary;
+			if (0 != (series.flags() & SeriesFlags.HAS_SET_DEFS)) {
+				LOG.trace ("Response includes local dictionary.");
+				local_dictionary = CodecFactory.createLocalFieldSetDefDb();
+				rc = local_dictionary.decode (it);
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.error ("LocalFieldSetDefDb.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+					return false;
+				}
+			} else {
+				local_dictionary = null;
+			}
+			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
+			final FieldList field_list = CodecFactory.createFieldList();
+			final FieldEntry field_entry = CodecFactory.createFieldEntry();
+			final com.thomsonreuters.upa.codec.Real rssl_real = CodecFactory.createReal();
+			final com.thomsonreuters.upa.codec.UInt rssl_uint = CodecFactory.createUInt();
+			final com.thomsonreuters.upa.codec.Enum rssl_enum = CodecFactory.createEnum();
+			final com.thomsonreuters.upa.codec.Date rssl_date = CodecFactory.createDate();
+			final com.thomsonreuters.upa.codec.Time rssl_time = CodecFactory.createTime();
+			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
+			DictionaryEntry dictionary_entry;
+			for (;;) {
+				rc = series_entry.decode (it);
+				if (CodecReturnCodes.END_OF_CONTAINER == rc)
+					break;
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.error ("SeriesEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+					return false;
+				}
 // flatten to dataframe.
 // SERIES 
 //   SERIES_ENTRY
 //     FIELD_LIST
-//       FIELD_ENTRY
-			for (Iterator it = ((OMMIterable)series).iterator(); it.hasNext();)
-			{
-				final OMMEntry series_entry = (OMMEntry)it.next();
-				if (OMMTypes.SERIES_ENTRY != series_entry.getType()) {
-					LOG.trace ("Unsupported data type ({}) in OMM series.", series_entry.getType());
-					continue;
+//	 FIELD_ENTRY
+				rc = field_list.decode (it, local_dictionary);
+				if (CodecReturnCodes.SUCCESS != rc) {
+					LOG.error ("FieldList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+					return false;
 				}
-				final OMMData field_list = series_entry.getData();
-				if (OMMTypes.FIELD_LIST != field_list.getType()) {
-					LOG.trace ("Unsupported data type ({}) in OMM series entry.", field_list.getType());
-					continue;
-				}
-//				DateTime datetime = new DateTime (0, DateTimeZone.UTC);
 				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
 				String row = null;
-				for (Iterator jt = ((OMMIterable)field_list).iterator(); jt.hasNext();)
-				{
-					final OMMEntry entry = (OMMEntry)jt.next();
-					if (OMMTypes.FIELD_ENTRY != entry.getType()) {
-						LOG.trace ("Unsupported data type ({}) in OMM field entry.", entry.getType());
-						continue;
+				for (;;) {
+					rc = field_entry.decode (it);
+					if (CodecReturnCodes.END_OF_CONTAINER == rc)
+						break;
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.error ("FieldEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+						return false;
 					}
-					final OMMFieldEntry fe = (OMMFieldEntry)entry;
-final FidDef fiddef = null;
-//					final FidDef fiddef = rdm_dictionary.getFieldDictionary().getFidDef (fe.getFieldId());
-					switch (fe.getFieldId()) {
+					dictionary_entry = rdm_dictionary.entry (field_entry.fieldId());
+					switch (field_entry.fieldId()) {
 					case 9217: // ITVL_DATE
-						if (OMMTypes.DATE == fiddef.getOMMType()) {
-							final OMMDateTime itvl_date = (OMMDateTime)fe.getData (fiddef.getOMMType());
-//							datetime = datetime.withDate (itvl_date.getYear(),
-//											itvl_date.getMonth(),
-//											itvl_date.getDate());
-//							row = '"' + datetime.toString() + '"';
-/* Cannot specify Instant.with(YEAR) */
-							datetime = datetime.withYear (itvl_date.getYear())
-										.withMonth (itvl_date.getMonth())
-										.withDayOfMonth (itvl_date.getDate());
+						if (DataTypes.DATE == dictionary_entry.rwfType()) {
+							final com.thomsonreuters.upa.codec.Date itvl_date = CodecFactory.createDate();
+							itvl_date.decode (it);
+							datetime = datetime.withYear (itvl_date.year())
+										.withMonth (itvl_date.month())
+										.withDayOfMonth (itvl_date.day());
 							row = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					case 14223: // ITVL_TM_MS
-						if (USE_RWF15_TIME_ENCODING) {
-/* Will crash on broken encoding */
-							final OMMDateTime itvl_tm = (OMMDateTime)fe.getData (fiddef.getOMMType());
-/* OMMDateTime.getMillisecond() requires RFAv8 */
-//							datetime = datetime.withTime (itvl_tm.getHour(),
-//											itvl_tm.getMinute(),
-//											itvl_tm.getSecond(),
-//											itvl_tm.getMillisecond());
-//							row = '"' + datetime.toString() + '"';
-							datetime = datetime.withHour (itvl_tm.getHour())
-									.withMinute (itvl_tm.getMinute())
-									.withSecond (itvl_tm.getSecond())
-									.withNano ((((itvl_tm.getMillisecond() * 1000) + itvl_tm.getMicrosecond()) * 1000) + itvl_tm.getNanosecond());
+						if (DataTypes.TIME == dictionary_entry.rwfType()) {
+							final com.thomsonreuters.upa.codec.Time itvl_tm = CodecFactory.createTime();
+							itvl_tm.decode (it);
+							datetime = datetime.withHour (itvl_tm.hour())
+									.withMinute (itvl_tm.minute())
+									.withSecond (itvl_tm.second())
+									.withNano ((((itvl_tm.millisecond() * 1000) + itvl_tm.microsecond()) * 1000) + itvl_tm.nanosecond());
 /* convert to get standard ISO 8601 Zulu "Z" suffix, otherwise "[UTC]" will apear */
-							row = '"' + datetime.toInstant().toString() + '"';
-						} else {
-/* fails miserably for any blank units as encoded length will be shorter than expected. */
-							final OMMData encoded_data = fe.getData(OMMTypes.BUFFER);
-							byte[] encoded_time = encoded_data.getBytes();
-							int hours  = UnsignedBytes.toInt (encoded_time[0]);
-							int mins   = UnsignedBytes.toInt (encoded_time[1]);
-							int secs   = 0;
-/* very weird OMM demarcation of fractional seconds */
-							int millis = 0;
-							int micros = 0;
-							int nanos  = 0;
-							if (entry.getData().getEncodedLength() == 8) {
-								nanos = Shorts.fromBytes ((byte)(encoded_time[5] >> 3), encoded_time[7]);
-							}
-							if (entry.getData().getEncodedLength() >= 7) {
-								micros = Shorts.fromBytes ((byte)(encoded_time[5] & 0x7), encoded_time[6]);
-							}
-							if (entry.getData().getEncodedLength() > 3) {
-								millis = Shorts.fromBytes (encoded_time[3], encoded_time[4]);
-							}
-							if (entry.getData().getEncodedLength() > 2) {
-								secs   = UnsignedBytes.toInt (encoded_time[2]);
-							}
-//							datetime = datetime.withTime (hours, mins, secs, millis);
-//							row = '"' + datetime.toString() + '"';
-							datetime = datetime.withHour (hours)
-									.withMinute (mins)
-									.withSecond (secs)
-									.withNano ((((millis * 1000) + micros) * 1000) + nanos);
 							row = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					default:
-						final OMMData data = (OMMData)fe.getData (fiddef.getOMMType());
-						switch (fiddef.getOMMType()) {
-						case OMMTypes.REAL:
-						case OMMTypes.UINT:
-							stream.addResult (row, fiddef.getName(), data.toString());
+						switch (dictionary_entry.rwfType()) {
+						case DataTypes.REAL:
+							rssl_real.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), rssl_real.toString());
 							break;
-
-						case OMMTypes.ENUM:
-//							stream.addResult (row, fiddef.getName(), '"' + rdm_dictionary.getFieldDictionary().expandedValueFor (fiddef.getFieldId(), ((OMMEnum)data).getValue()) + '"');
+						case DataTypes.UINT:
+							rssl_uint.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), rssl_uint.toString());
 							break;
-
-						case OMMTypes.RMTES_STRING:
-						case OMMTypes.DATE:
-						case OMMTypes.TIME:
-							stream.addResult (row, fiddef.getName(), '"' + data.toString() + '"');
+						case DataTypes.ENUM:
+							rssl_enum.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString() + '"');
 							break;
-
+						case DataTypes.RMTES_STRING:
+							rssl_buffer.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_buffer.toString() + '"');
+							break;
+						case DataTypes.DATE:
+							rssl_date.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_date.toString() + '"');
+							break;
+						case DataTypes.TIME:
+							rssl_time.decode (it);
+							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_time.toString() + '"');
+							break;
 						default:
+							rssl_buffer.decode (it);
 							break;
 						}
 						break;
@@ -1055,7 +1014,7 @@ final FidDef fiddef = null;
 				}
 			}
 
-			if (msg.isFinal()) {
+			if (msg.isFinalMsg()) {
 				sb.setLength (0);
 				sb.append ('{')
 				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
@@ -1064,8 +1023,8 @@ final FidDef fiddef = null;
 				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
 				  .append (", \"fields\": [\"datetime\"");
 				final Set<String> fids = stream.getResultFids();
-				for (Iterator it = fids.iterator(); it.hasNext();) {
-					final String fid = (String)it.next();
+				for (Iterator jt = fids.iterator(); jt.hasNext();) {
+					final String fid = (String)jt.next();
 					sb.append (",")
 					  .append ("\"")
 					  .append (fid)
@@ -1075,8 +1034,8 @@ final FidDef fiddef = null;
 				  .append (", \"timeseries\": [[");
 				Joiner.on (",").appendTo (sb, stream.getResultDateTimes());
 				sb.append ("]");
-				for (Iterator it = fids.iterator(); it.hasNext();) {
-					final String fid = (String)it.next();
+				for (Iterator jt = fids.iterator(); jt.hasNext();) {
+					final String fid = (String)jt.next();
 LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 					sb.append (",")
 					  .append ("[");
@@ -1085,252 +1044,49 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				}
 				sb.append ("]")
 				  .append ("}");
-				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+				LOG.trace ("{}", sb.toString());
+//				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 				this.destroyItemStream (stream);
 			}
 
 			return true;
 		}
 
-		private void OnAnalyticsStatus (State response_status, AnalyticStream stream, int response_code) {
+		private boolean OnHistoryStatus (Channel c, DecodeIterator it, StatusMsg msg) {
+			LOG.trace ("OnHistoryStatus: {}", msg);
+			final AnalyticStream stream = this.stream_map.get (msg.streamId());
+			if (null == stream) {
+				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
+				return true;
+			}
+			if (msg.isFinalMsg()) {
+				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" is closed.",
+					stream.getQuery(), stream.getServiceName(), stream.getAppName());
+			}
+/* auxiliary stream recovered. */
+			if (0 != (msg.flags() & StatusMsgFlags.HAS_STATE)
+				&& StreamStates.OPEN == msg.state().streamState()
+				&& DataStates.OK == msg.state().dataState())
+			{
+				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" has recovered.",
+					stream.getQuery(), stream.getServiceName(), stream.getAppName());
+				return true;
+			}
+
 /* Defer to GSON to escape status text. */
 			LogMessage log_msg = new LogMessage (
-				"STATUS",
+				MsgClasses.toString (msg.msgClass()),
 				stream.getServiceName(),
 				stream.getAppName(),
 				stream.getItemName(),
 				stream.getQuery(),
-				StreamStates.toString (response_status.streamState()),
-				DataStates.toString (response_status.dataState()),
-				StateCodes.toString (response_status.code()),
-				response_status.text().toString());
-			if (HttpURLConnection.HTTP_UNAVAILABLE == response_code) {
-/* for SBUX.N response.GetInstrumentDataAsXmlResult->error:  description: Host: NYCSCR03, error: UnknownInstrument errorCode: TAS__ErrorCode__TSIError errorCode: 1 */
-				if (log_msg.text.contains ("error: UnknownInstrument")) {
-					response_code = HttpURLConnection.HTTP_NOT_FOUND;
-				}
-			}
-			stream.getDispatcher().dispatch (stream, response_code, gson.toJson (log_msg));
-			this.destroyItemStream (stream);
-		}
-
-/* example response:
- * MESSAGE
- *   Msg Type: MsgType.STATUS_RESP
- *   Msg Model Type: Unknown Msg Model Type: 30
- *   Indication Flags: PRIVATE_STREAM
- *   Hint Flags: HAS_STATE
- *   State: CLOSED, SUSPECT, ERROR,  " bidPrice: 97.42 bidSize: 400 bidtime: 2014-11-20T19:00:00.000Z  askPrice: 97.44 askSize: 100 asktime: 2014-11-20T19:00:00.000Z  tradePrice: 97.42 tradeSize: 52 tradetime: 2014-11-20T18:59:46.000Z "
- *   Payload: None
- */
-		private final Pattern TECHANALYSIS_PATTERN = Pattern.compile ("(\\S+):\\s(\\S*)\\s");
-		private boolean OnTechAnalysisResponse (OMMMsg msg, AnalyticStream stream) {
-			LOG.trace ("OnTechAnalysisResponse: {}", msg);
-			if (!(msg.has (OMMMsg.HAS_STATE)
-				&& (OMMState.Stream.CLOSED == msg.getState().getStreamState())
-				&& (OMMState.Data.SUSPECT == msg.getState().getDataState())
-				&& (OMMState.Code.ERROR == msg.getState().getCode())))
-			{
-				return false;
-			}
-
-			final String text = msg.getState().getText();
-			if (text.isEmpty()
-				|| !(text.startsWith (" bidPrice: ")			/* taqfromdatetime */
-				     || text.startsWith (" tradePrice: ")
-				     || text.startsWith ("201")))			/* tradespreadperformance */
-			{
-				return false;
-			}
-
-			sb.setLength (0);
-			sb.append ('{')
-			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
-			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
-			if (text.startsWith ("201"))
-			{
-				sb.append (',')
-				  .append ("\"timeseries\": [[");
-				List<String> times = Lists.newLinkedList(), values = Lists.newLinkedList();
-				final Splitter newline = Splitter.on ('\n').omitEmptyStrings(), comma = Splitter.on (',');
-				for (String entry : newline.split (text)) {
-					Iterator<String> it = comma.split (entry).iterator();
-					times.add (it.next());
-					values.add (it.next());
-				}
-				Joiner.on (",").appendTo (sb, Iterables.transform (times, new Function<String, String>() {
-					public String apply (String arg0) {
-						return "\"" + arg0 + "\"";
-					}}));
-				sb.append ("],[");
-				Joiner.on (",").appendTo (sb, values.iterator());
-				sb.append ("]]");
-			}
-			else
-			{
-				final Matcher matcher = TECHANALYSIS_PATTERN.matcher (text);
-				while (matcher.find()) {
-					final String name = matcher.group (1);
-					sb.append (',')
-					  .append ('\"').append (name).append ("\":");
-					final String value = matcher.group (2);
-					if (null == Floats.tryParse (value)) {
-						sb.append ('\"').append (value).append ('\"');
-					} else {
-						sb.append (value);
-					}
-				}
-			}
-			sb.append ("}");
-			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+				StreamStates.toString (msg.state().streamState()),
+				DataStates.toString (msg.state().dataState()),
+				StateCodes.toString (msg.state().code()),
+				msg.state().text().toString());
+			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_UNAVAILABLE, gson.toJson (log_msg));
 			this.destroyItemStream (stream);
 			return true;
-		}
-
-		private void OnAnalyticsResponse (OMMMsg msg, Handle handle, Object closure) {
-			LOG.trace ("OnAnalyticsResponse: {}", msg);
-/* Closures do not work as expected, implement stream id map */
-			final AnalyticStream stream = this.stream_map.get (msg.getStreamId());
-			if (null == stream) {
-				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.getStreamId());
-				return;
-			}
-/* Clear request timeout */
-			if (stream.hasTimerHandle()) {
-				final Handle timer_handle = stream.getTimerHandle();
-				this.omm_consumer.unregisterClient (timer_handle);
-				stream.clearTimerHandle();
-				stream.clearRetryCount();
-			}
-			if (msg.isFinal()) {
-				LOG.trace ("Command id for query \"{}\" on service/app \"{}/{}\" is closed.",
-					stream.getQuery(), stream.getServiceName(), stream.getAppName());
-				stream.clearCommandId();
-			}
-			if (OMMMsg.MsgType.REFRESH_RESP == msg.getMsgType()) {
-/* fall through */
-/* Hook for History responses */
-				if (stream.getAppName().equals ("History")
-					&& this.OnHistoryResponse (msg, stream))
-				{
-					return;
-				}
-			}
-			else if (OMMMsg.MsgType.UPDATE_RESP == msg.getMsgType()) {
-				LOG.trace ("Ignoring update.");
-				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected final update response.");
-					this.destroyItemStream (stream);
-				}
-				return;
-			}
-			else if (OMMMsg.MsgType.STATUS_RESP == msg.getMsgType()) {
-				LOG.trace ("Status: {}", msg);
-
-/* Analytic stream recovered. */
-				if (msg.has (OMMMsg.HAS_STATE)
-					&& (OMMState.Stream.OPEN == msg.getState().getStreamState())
-					&& (OMMState.Data.OK == msg.getState().getDataState()))
-				{
-					return;
-				}
-
-/* Hook for TechAnalysis responses */
-				if (stream.getAppName().equals ("TechAnalysis")
-					&& this.OnTechAnalysisResponse (msg, stream))
-				{
-					return;
-				}
-
-//				this.OnAnalyticsStatus (msg.state(),
-//							stream,
-//							HttpURLConnection.HTTP_UNAVAILABLE);
-				return;
-			}
-			else {
-				LOG.trace ("Unhandled OMM message type ({}).", msg.getMsgType());
-				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected final response.");
-					this.destroyItemStream (stream);
-				}
-				return;
-			}
-
-			if (OMMTypes.FIELD_LIST != msg.getDataType()) {
-				LOG.trace ("Unsupported data type ({}) in OMM event.", msg.getDataType());
-				if (msg.isFinal()) {
-					stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
-					this.destroyItemStream (stream);
-				}
-				return;
-			}
-
-	                final OMMFieldList field_list = (OMMFieldList)msg.getPayload();
-
-			if (LOG.isDebugEnabled()) {
-				final Iterator<?> it = field_list.iterator();
-				while (it.hasNext()) {
-					final OMMFieldEntry field_entry = (OMMFieldEntry)it.next();
-					final short fid = field_entry.getFieldId();
-final FidDef fid_def = null;
-//					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
-					final OMMData data = field_entry.getData (fid_def.getOMMType());
-					LOG.debug (new StringBuilder()
-						.append (fid_def.getName())
-						.append (": ")
-						.append (data.isBlank() ? "null" : data.toString())
-						.toString());
-				}
-			}
-
-			sb.setLength (0);
-			sb.append ('{')
-			  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
-			  .append (", \"query\":\"").append (stream.getQuery()).append ('\"');
-			if (!field_list.isBlank()) {
-				final Iterator<?> it = field_list.iterator();
-				while (it.hasNext()) {
-					final OMMFieldEntry field_entry = (OMMFieldEntry)it.next();
-					final short fid = field_entry.getFieldId();
-final FidDef fid_def = null;
-//					final FidDef fid_def = rdm_dictionary.getFieldDictionary().getFidDef (fid);
-					final OMMData data = field_entry.getData (fid_def.getOMMType());
-					sb.append (',')
-					  .append ('\"').append (fid_def.getName()).append ("\":");
-					if (data.isBlank()) {
-						sb.append ("null");
-					} else {
-						switch (fid_def.getOMMType()) {
-/* values that can be represented raw in JSON form */
-						case OMMTypes.DOUBLE:
-						case OMMTypes.DOUBLE_8:
-						case OMMTypes.FLOAT:
-						case OMMTypes.FLOAT_4:
-						case OMMTypes.INT:
-						case OMMTypes.INT_1:
-						case OMMTypes.INT_2:
-						case OMMTypes.INT_4:
-						case OMMTypes.INT_8:
-						case OMMTypes.REAL:
-						case OMMTypes.REAL_4RB:
-						case OMMTypes.REAL_8RB:
-						case OMMTypes.UINT:
-						case OMMTypes.UINT_1:
-						case OMMTypes.UINT_2:
-						case OMMTypes.UINT_4:
-						case OMMTypes.UINT_8:
-							sb.append (data.toString());
-							break;
-						default:
-							sb.append ('\"').append (data.toString()).append ('\"');
-							break;
-                                                }
-					}
-				}
-			}
-			sb.append ("}");
-			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
-			this.destroyItemStream (stream);
 		}
 
 		private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
@@ -1424,9 +1180,9 @@ final FidDef fid_def = null;
 /* Prevent attempts to send a close request */
 				stream.close();
 /* Destroy for snapshots */
-				this.OnAnalyticsStatus (this.closed_response_status,
-							stream,
-							HttpURLConnection.HTTP_UNAVAILABLE);
+//				this.OnHistoryStatus (this.closed_response_status,
+//							stream,
+//							HttpURLConnection.HTTP_UNAVAILABLE);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}
@@ -1497,14 +1253,14 @@ final FidDef fid_def = null;
 	private static final boolean DO_NOT_CACHE_BLANK_VALUE	= true;
 
 	private static final int MAX_MSG_SIZE			= 4096;
-	private static final int OMM_PAYLOAD_SIZE	     	= 5000;
+	private static final int OMM_PAYLOAD_SIZE		= 5000;
 	private static final int GC_DELAY_MS			= 15000;
 	private static final int RESUBSCRIPTION_MS		= 180000;
 	private static final int DEFAULT_RETRY_TIMER_MS		= 60000;
 	private static final int DEFAULT_RETRY_LIMIT		= 0;
 	private static final int DEFAULT_STREAM_IDENTIFIER	= 1;
 
-	private static final String RSSL_PROTOCOL      	 	= "rssl";
+	private static final String RSSL_PROTOCOL		= "rssl";
 
 	public AnalyticConsumer (SessionConfig config, Upa upa) {
 		this.config = config;
@@ -2240,8 +1996,9 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			return this.OnDirectory (c, it, msg);
 		case DomainTypes.DICTIONARY:
 			return this.OnDictionary (c, it, msg);
-/* FIXME: DomainTypes.SYSTEM */
 		case DomainTypes.HISTORY:
+		case DomainTypes.ANALYTICS:
+		case DomainTypes.SYSTEM:
 			return this.OnSystem (c, it, msg);
 		default:
 			LOG.warn ("Uncaught message: {}", this.DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
@@ -3125,7 +2882,7 @@ LOG.debug ("dictionary token {}", this.token);
 		}
 		final RDMLoginResponse response = new RDMLoginResponse (msg);
 		final byte stream_state = response.getRespStatus().getStreamState();
-		final byte data_state   = response.getRespStatus().getDataState();
+		final byte data_state	= response.getRespStatus().getDataState();
 
 		switch (stream_state) {
 		case OMMState.Stream.OPEN:
