@@ -28,6 +28,8 @@ import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
@@ -207,7 +209,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 	int pending_count;
 /* Data dictionaries. */
 	private DataDictionary rdm_dictionary;
-	private Map<String, Integer> dictionary_tokens;
+	private BiMap<String, Integer> dictionary_tokens;
 
 /* Watchlist of all items. */
 	private List<ItemStream> directory;
@@ -1453,9 +1455,9 @@ final FidDef fid_def = null;
 			return false;
 		}
 
-		this.directory = new LinkedList<ItemStream>();
-		this.tokens = new LinkedHashMap<Integer, ItemStream>();
-		this.dictionary_tokens = new TreeMap<String, Integer>();
+		this.directory = new LinkedList<>();
+		this.tokens = new LinkedHashMap<>();
+		this.dictionary_tokens = HashBiMap.create();
 		this.rdm_dictionary = CodecFactory.createDataDictionary();
 		return true;
 	}
@@ -2295,15 +2297,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			return true;
 		}
 
-		final DictionaryMsg response = DictionaryMsgFactory.createMsg();
-		response.rdmMsgType (DictionaryMsgType.REFRESH);
-		final int rc = response.decode (it, msg);
-		if (CodecReturnCodes.SUCCESS != rc) {
-			LOG.warn ("DictionaryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
-				rc, CodecReturnCodes.toString (rc));
-			return false;
-		}
-		return this.OnDictionaryRefresh (c, it, (DictionaryRefresh)response);
+		return this.OnDictionaryRefresh (c, it, (RefreshMsg)msg);
 	}
 
 /* thunk to app object for private stream processing. */
@@ -2320,13 +2314,19 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 
 /* Replace any existing RDM dictionary upon a dictionary refresh message.
  */
-	private boolean OnDictionaryRefresh (Channel c, DecodeIterator it, DictionaryRefresh response) {
+	private boolean OnDictionaryRefresh (Channel c, DecodeIterator it, RefreshMsg response) {
 		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
 		int rc;
 
 		LOG.debug ("OnDictionaryRefresh");
-		switch (response.dictionaryType()) {
-		case Dictionary.Types.FIELD_DEFINITIONS:
+		if (0 == (response.flags() & RefreshMsgFlags.HAS_MSG_KEY)) {
+			LOG.warn ("Dictionary refresh messages should contain a msgKey component, rejecting.");
+			return false;
+		}
+		final MsgKey msg_key = response.msgKey();
+
+		switch (this.dictionary_tokens.inverse().get (response.streamId())) {
+		case FIELD_DICTIONARY_NAME:
 			rc = this.rdm_dictionary.decodeFieldDictionary (it, Dictionary.VerbosityValues.NORMAL, rssl_err);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.info ("DataDictionary.decodeFieldDictionary: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
@@ -2335,7 +2335,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			}
 			break;
 
-		case Dictionary.Types.ENUM_TABLES:
+		case ENUM_TYPE_DICTIONARY_NAME:
 			rc = this.rdm_dictionary.decodeEnumTypeDictionary (it, Dictionary.VerbosityValues.NORMAL, rssl_err);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.info ("DataDictionary.decodeEnumTypeDictionary: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
@@ -2349,7 +2349,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			return true;
 		}
 
-		if (0 != (response.flags() & DictionaryRefreshFlags.IS_COMPLETE)
+		if (0 != (response.flags() & RefreshMsgFlags.REFRESH_COMPLETE)
 			&& 0 != this.rdm_dictionary.enumTableCount()
 			&& 0 != this.rdm_dictionary.numberOfEntries())
 		{
