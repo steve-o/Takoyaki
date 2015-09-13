@@ -121,9 +121,14 @@ import com.thomsonreuters.upa.codec.ElementEntry;
 import com.thomsonreuters.upa.codec.ElementList;
 import com.thomsonreuters.upa.codec.ElementListFlags;
 import com.thomsonreuters.upa.codec.EncodeIterator;
+import com.thomsonreuters.upa.codec.FieldEntry;
+import com.thomsonreuters.upa.codec.FieldList;
+import com.thomsonreuters.upa.codec.FieldListFlags;
 import com.thomsonreuters.upa.codec.FilterEntry;
 import com.thomsonreuters.upa.codec.FilterEntryActions;
 import com.thomsonreuters.upa.codec.FilterList;
+import com.thomsonreuters.upa.codec.GenericMsg;
+import com.thomsonreuters.upa.codec.GenericMsgFlags;
 import com.thomsonreuters.upa.codec.MapEntryActions;
 import com.thomsonreuters.upa.codec.Msg;
 import com.thomsonreuters.upa.codec.MsgClasses;
@@ -435,7 +440,7 @@ request.qos().timeInfo (0);
 			stream.setStreamId (this.acquireStreamId());
 
 			if (!this.pending_connection)
-				this.sendItemRequest (stream);
+				this.sendItemRequest (connection, stream);
 			this.streams.add (stream);
 			this.stream_map.put (stream.getStreamId(), stream);
 
@@ -482,106 +487,222 @@ request.qos().timeInfo (0);
  */
 			for (AnalyticStream stream : this.streams) {
 				if (!stream.hasCommandId() && !stream.isClosed())
-					this.sendItemRequest (stream);
+					this.sendItemRequest (connection, stream);
 			}
 		}
 
-		private void sendItemRequest (AnalyticStream stream) {
+		private boolean sendItemRequest (Channel c, AnalyticStream stream) {
 			LOG.trace ("Sending analytic query request.");
-			OMMMsg msg = this.omm_pool.acquireMsg();
-			msg.setStreamId (stream.getStreamId());
-//			msg.setAssociatedMetaInfo (this.private_stream);
-			msg.setMsgType (OMMMsg.MsgType.REQUEST);
 
-			if (stream.getAppName().equals ("History"))
-			{
-//				msg.setQosReq (OMMQosReq.QOSR_REALTIME_TICK_BY_TICK);
-				msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
-				OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
-				attribInfo.setNameType ((short)0x1 /* RIC */);
-//				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.ATTRIB_INFO_IN_UPDATES);
-				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING);
-//				msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
-				attribInfo.setName (stream.getItemName());
-				msg.setAttribInfo (attribInfo);
-				this.omm_pool.releaseAttribInfo (attribInfo);
+/* Prepare GenericMsg encapsulation */
+			final GenericMsg wrapper = (GenericMsg)CodecFactory.createMsg();
+			wrapper.domainType (DomainTypes.HISTORY);
+			wrapper.msgClass (MsgClasses.GENERIC);
+			wrapper.flags (GenericMsgFlags.MESSAGE_COMPLETE);
+			wrapper.containerType (DataTypes.MSG);
+			wrapper.streamId (this.private_stream.token);
+			final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
+			final TransportBuffer buf = c.getBuffer (MAX_MSG_SIZE, false /* not packed */, rssl_err);
+			if (null == buf) {
+				LOG.error ("Channel.getBuffer: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\", \"size\": {}, \"packedBuffer\": false }",
+					rssl_err.errorId(), rssl_err.sysError(), rssl_err.text(),
+					MAX_MSG_SIZE);
+				return false;
+			}
+			final EncodeIterator it = CodecFactory.createEncodeIterator();
+			it.clear();
+			int rc = it.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("EncodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					c.majorVersion(), c.minorVersion());
+				return false;
+			}
+			rc = wrapper.encodeInit (it, MAX_MSG_SIZE);
+			if (CodecReturnCodes.ENCODE_CONTAINER != rc) {
+				LOG.error ("GenericMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
 
-/* OMMAttribInfo.Attrib as an OMMElementList */
-				this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-				this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
-				this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
+			final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
+/* Set the message model type. */
+			request.domainType (DomainTypes.HISTORY);
+/* Set request type. */
+			request.msgClass (MsgClasses.REQUEST);
+			request.flags (RequestMsgFlags.NONE);
+/* No view thus no payload. */
+			request.containerType (DataTypes.NO_DATA);
+/* Set the stream token. */
+			request.streamId (stream.getStreamId());
+
+/* In RFA lingo an attribute object */
+			request.msgKey().nameType (InstrumentNameTypes.RIC);
+			request.msgKey().name().data (stream.getItemName());
+			request.msgKey().flags (MsgKeyFlags.HAS_NAME_TYPE | MsgKeyFlags.HAS_NAME);
+
+/* App request elements */
+			request.msgKey().attribContainerType (DataTypes.FIELD_LIST);
+			request.msgKey().flags (request.msgKey().flags() | MsgKeyFlags.HAS_ATTRIB);
+
+			rc = request.encodeInit (it, 0 /* max message size */);
+			if (CodecReturnCodes.ENCODE_MSG_KEY_ATTRIB != rc) {
+				LOG.error ("RequestMsg.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+/* Encode attribute object after message instead of before as per RFA. */
+			final FieldList field_list = CodecFactory.createFieldList();
+			final FieldEntry field_entry = CodecFactory.createFieldEntry();
+			final com.thomsonreuters.upa.codec.Date rssl_date = CodecFactory.createDate();
+			final com.thomsonreuters.upa.codec.Time rssl_time = CodecFactory.createTime();
+			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
+			final com.thomsonreuters.upa.codec.Enum rssl_enum = CodecFactory.createEnum();
+			final com.thomsonreuters.upa.codec.Int rssl_int = CodecFactory.createInt();
+			field_list.flags (FieldListFlags.HAS_STANDARD_DATA | FieldListFlags.HAS_FIELD_LIST_INFO);
+			field_list.dictionaryId (1 /* RDMFieldDictionary */);
+			field_list.fieldListNum (0 /* record template number */);
+			rc = field_list.encodeInit (it, null /* local dictionary */, 0 /* size hint */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldList.encodeInit: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"flags\": \"HAS_STANDARD_DATA|HAS_FIELD_LIST_INFO\", \"dictionaryId\": {}, \"fieldListNum\": {} }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_list.dictionaryId(), field_list.fieldListNum());
+				return false;
+			}
 // MET_TF_U: 9=TAS, 10=TAQ
-				this.omm_encoder.encodeFieldEntryInit ((short)12794, OMMTypes.ENUM);
-				switch (stream.getQuery()) {
-				case "days":		this.omm_encoder.encodeEnum (4); break;
-				case "weeks":		this.omm_encoder.encodeEnum (5); break;
-				case "months":		this.omm_encoder.encodeEnum (6); break;
-				case "quarters":	this.omm_encoder.encodeEnum (7); break;
-				case "years":		this.omm_encoder.encodeEnum (8); break;
-				case "tas":		this.omm_encoder.encodeEnum (9); break;
-				case "taq":		this.omm_encoder.encodeEnum (10); break;
-				default: break;
-				}
+			switch (stream.getQuery()) {
+			case "days":		rssl_enum.value (4); break;
+			case "weeks":		rssl_enum.value (5); break;
+			case "months":		rssl_enum.value (6); break;
+			case "quarters":	rssl_enum.value (7); break;
+			case "years":		rssl_enum.value (8); break;
+			case "tas":		rssl_enum.value (9); break;
+			case "taq":		rssl_enum.value (10); break;
+			default: break;
+			}
+			field_entry.dataType (DataTypes.ENUM);
+			field_entry.fieldId (12794);
+			rc = field_entry.encode (it, rssl_enum);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"MET_TF_U\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_enum);
+				return false;
+			}
 // RQT_S_DATE+RQT_STM_MS
-				this.omm_encoder.encodeFieldEntryInit ((short)9219, OMMTypes.DATE);
-				this.omm_encoder.encodeDate (stream.getInterval().getStart().getYear(),
-								stream.getInterval().getStart().getMonthOfYear(),
-								stream.getInterval().getStart().getDayOfMonth());
-				this.omm_encoder.encodeFieldEntryInit ((short)14225, OMMTypes.TIME);
-				this.omm_encoder.encodeTime (stream.getInterval().getStart().getHourOfDay(),
-								stream.getInterval().getStart().getMinuteOfHour(),
-								stream.getInterval().getStart().getSecondOfMinute(),
-								stream.getInterval().getStart().getMillisOfSecond());
+			rssl_date.clear();
+			rssl_date.year (stream.getInterval().getStart().getYear());
+			rssl_date.month (stream.getInterval().getStart().getMonthOfYear());
+			rssl_date.day (stream.getInterval().getStart().getDayOfMonth());
+			field_entry.dataType (DataTypes.DATE);
+			field_entry.fieldId (9219);
+			rc = field_entry.encode (it, rssl_date);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"RQT_S_DATE\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_date);
+				return false;
+			}
+			rssl_time.clear();
+			rssl_time.hour (stream.getInterval().getStart().getHourOfDay());
+			rssl_time.minute (stream.getInterval().getStart().getMinuteOfHour());
+			rssl_time.second (stream.getInterval().getStart().getSecondOfMinute());
+			rssl_time.millisecond (stream.getInterval().getStart().getMillisOfSecond());
+			field_entry.dataType (DataTypes.TIME);
+			field_entry.fieldId (14225);
+			rc = field_entry.encode (it, rssl_time);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"RQT_STM_MS\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_time);
+				return false;
+			}
 // RQT_E_DATE+RQT_ETM_MS
-				this.omm_encoder.encodeFieldEntryInit ((short)9218, OMMTypes.DATE);
-				this.omm_encoder.encodeDate (stream.getInterval().getEnd().getYear(),
-								stream.getInterval().getEnd().getMonthOfYear(),
-								stream.getInterval().getEnd().getDayOfMonth());
-				this.omm_encoder.encodeFieldEntryInit ((short)14224, OMMTypes.TIME);
-				this.omm_encoder.encodeTime (stream.getInterval().getEnd().getHourOfDay(),
-								stream.getInterval().getEnd().getMinuteOfHour(),
-								stream.getInterval().getEnd().getSecondOfMinute(),
-								stream.getInterval().getEnd().getMillisOfSecond());
+			rssl_date.clear();
+			rssl_date.year (stream.getInterval().getEnd().getYear());
+			rssl_date.month (stream.getInterval().getEnd().getMonthOfYear());
+			rssl_date.day (stream.getInterval().getEnd().getDayOfMonth());
+			field_entry.dataType (DataTypes.DATE);
+			field_entry.fieldId (9218);
+			rc = field_entry.encode (it, rssl_date);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"RQT_E_DATE\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_date);
+				return false;
+			}
+			rssl_time.clear();
+			rssl_time.hour (stream.getInterval().getEnd().getHourOfDay());
+			rssl_time.minute (stream.getInterval().getEnd().getMinuteOfHour());
+			rssl_time.second (stream.getInterval().getEnd().getSecondOfMinute());
+			rssl_time.millisecond (stream.getInterval().getEnd().getMillisOfSecond());
+			field_entry.dataType (DataTypes.TIME);
+			field_entry.fieldId (14224);
+			rc = field_entry.encode (it, rssl_time);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"RQT_ETM_MS\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_time);
+				return false;
+			}
 // optional: CORAX_ADJ
-				this.omm_encoder.encodeFieldEntryInit ((short)12886, OMMTypes.ENUM);
-				this.omm_encoder.encodeEnum (1);
+			rssl_enum.value (1);
+			field_entry.dataType (DataTypes.ENUM);
+			field_entry.fieldId (12886);
+			rc = field_entry.encode (it, rssl_enum);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"CORAX_ADJ\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_enum);
+				return false;
+			}
 // optional: MAX_POINTS
-				this.omm_encoder.encodeFieldEntryInit ((short)7040, OMMTypes.INT);
-				this.omm_encoder.encodeInt (100);
-				this.omm_encoder.encodeAggregateComplete();
+			rssl_int.value (100);
+			field_entry.dataType (DataTypes.INT);
+			field_entry.fieldId (7040);
+			rc = field_entry.encode (it, rssl_int);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldEntry.encode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\", \"fieldId\": {}, \"dataType\": \"{}\", \"MAX_POINTS\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
+					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_int);
+				return false;
 			}
-			else
-			{
-				msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
-// TBD: SignalsApp does not support snapshot requests.
-				OMMAttribInfo attribInfo = this.omm_pool.acquireAttribInfo();
-				attribInfo.setNameType ((short)0x1 /* RIC */);
-				attribInfo.setId (0x1 /* TechAnalysis */);
-				if (!stream.getQuery().startsWith ("#type=")) {
-					msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.PRIVATE_STREAM);
-					attribInfo.setName (stream.getItemName());
-				} else {
-					msg.setIndicationFlags (OMMMsg.Indication.REFRESH | OMMMsg.Indication.NONSTREAMING | OMMMsg.Indication.PRIVATE_STREAM);
-					sb.setLength (0);
-					sb.append ("/").append (stream.getItemName());
-					attribInfo.setName (sb.toString());
-				}
-				msg.setAttribInfo (attribInfo);
-				this.omm_pool.releaseAttribInfo (attribInfo);
-
-/* OMMAttribInfo.Attrib as an OMMElementList */
-				this.omm_encoder.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-				this.omm_encoder.encodeMsgInit (msg, OMMTypes.FIELD_LIST, OMMTypes.NO_DATA);
-				this.omm_encoder.encodeFieldListInit (OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
-				this.omm_encoder.encodeFieldEntryInit ((short)32650, OMMTypes.RMTES_STRING);
-				this.omm_encoder.encodeString (stream.getQuery(), OMMTypes.RMTES_STRING);
-				this.omm_encoder.encodeFieldEntryInit ((short)12069, OMMTypes.RMTES_STRING);
-				this.omm_encoder.encodeString (this.uuid, OMMTypes.RMTES_STRING);
-				this.omm_encoder.encodeAggregateComplete();
+			rc = field_list.encodeComplete (it, true /* commit */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("FieldList.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			rc = request.encodeKeyAttribComplete (it, true /* commit */);
+			if (CodecReturnCodes.ENCODE_CONTAINER != rc) {
+				LOG.error ("RequestMsg.encodeKeyAttribComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			rc = request.encodeComplete (it, true /* commit */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("RequestMsg.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+			rc = wrapper.encodeComplete (it, true /* commit */);
+			if (CodecReturnCodes.SUCCESS != rc) {
+				LOG.error ("GenericMsg.encodeComplete: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+				return false;
+			}
+	
+/* Message validation. */
+			if (!wrapper.validateMsg()) {
+				LOG.error ("RequestMsg.validateMsg failed.");
+				return false;
 			}
 
-//			stream.setCommandId (this.sendGenericMsg ((OMMMsg)this.omm_encoder.getEncodedObject(), this.private_stream, stream));
-			this.omm_pool.releaseMsg (msg);
+			if (0 == Submit (c, buf)) {
+				return false;
+			} else {
+				return true;
+			}
 		}
 
 		private void cancelItemRequest (AnalyticStream stream) {
@@ -607,34 +728,6 @@ request.qos().timeInfo (0);
 
 //			stream.setCommandId (this.sendGenericMsg (msg, this.private_stream, stream));
 			this.omm_pool.releaseMsg (msg);
-		}
-
-		private int sendGenericMsg (OMMMsg encapsulated_msg, Handle stream_handle, java.lang.Object closure) {
-			LOG.trace ("Sending generic message request.");
-			OMMMsg msg = this.omm_pool.acquireMsg();
-			msg.setMsgType (OMMMsg.MsgType.GENERIC);
-			msg.setMsgModelType ((short)127 /* RDMMsgTypes.SYSTEM */);
-msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
-			msg.setAssociatedMetaInfo (stream_handle);
-			msg.setIndicationFlags (OMMMsg.Indication.GENERIC_COMPLETE);
-
-/* Encapsulate provided message */
-			this.omm_encoder2.initialize (OMMTypes.MSG, OMM_PAYLOAD_SIZE);
-			this.omm_encoder2.encodeMsgInit (msg, OMMTypes.NO_DATA, OMMTypes.MSG);
-			this.omm_encoder2.encodeMsg (encapsulated_msg);
-
-			OMMHandleItemCmd cmd = new OMMHandleItemCmd();
-			cmd.setMsg ((OMMMsg)this.omm_encoder2.getEncodedObject());
-			if (LOG.isDebugEnabled()) {
-				ByteArrayOutputStream baos = new ByteArrayOutputStream();
-				PrintStream ps = new PrintStream (baos);
-				GenericOMMParser.parseMsg (cmd.getMsg(), ps);
-				LOG.debug ("Generic message:{}{}", LINE_SEPARATOR, baos.toString());
-			}
-			cmd.setHandle (stream_handle);
-			final int command_id = this.omm_consumer.submit (cmd, closure);
-			this.omm_pool.releaseMsg (msg);
-			return command_id;
 		}
 
 		@Override
@@ -709,7 +802,7 @@ msg.setMsgModelType ((short)12 /* RDMMsgTypes.HISTORY */);
 							stream,
 							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 				stream.incrementRetryCount();
-				this.sendItemRequest (stream);
+				this.sendItemRequest (connection, stream);
 				this.registerRetryTimer (stream, retry_timer_ms);
 			}
 		}
