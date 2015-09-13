@@ -120,11 +120,16 @@ import com.thomsonreuters.upa.codec.ElementListFlags;
 import com.thomsonreuters.upa.codec.EncodeIterator;
 import com.thomsonreuters.upa.codec.Msg;
 import com.thomsonreuters.upa.codec.MsgClasses;
+import com.thomsonreuters.upa.codec.MsgKey;
 import com.thomsonreuters.upa.codec.MsgKeyFlags;
+import com.thomsonreuters.upa.codec.RefreshMsg;
+import com.thomsonreuters.upa.codec.RefreshMsgFlags;
 import com.thomsonreuters.upa.codec.RequestMsg;
 import com.thomsonreuters.upa.codec.RequestMsgFlags;
 import com.thomsonreuters.upa.codec.State;
 import com.thomsonreuters.upa.codec.StateCodes;
+import com.thomsonreuters.upa.codec.StatusMsg;
+import com.thomsonreuters.upa.codec.StatusMsgFlags;
 import com.thomsonreuters.upa.codec.StreamStates;
 import com.thomsonreuters.upa.rdm.Dictionary;
 import com.thomsonreuters.upa.rdm.Directory;
@@ -2156,53 +2161,35 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	}
 
 	private boolean OnLoginResponse (Channel c, DecodeIterator it, Msg msg) {
-		final LoginMsg response = LoginMsgFactory.createMsg();
+		State state = null;
 
-/*		switch (msg.msgClass()) {
-		case MsgClasses.REFRESH:	response.rdmMsgType (LoginMsgType.REFRESH); break;
-		case MsgClasses.STATUS:		response.rdmMsgType (LoginMsgType.STATUS); break;
-		case MsgClasses.CLOSE:		response.rdmMsgType (LoginMsgType.CLOSE); break;
-		default: return false;
-		} */
-		final int rc = response.decode (it, msg);
-		if (CodecReturnCodes.SUCCESS != rc) {
-/* NB: minimal error detail compared with UPA/C */
-			LOG.warn ("LoginMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
-				rc, CodecReturnCodes.toString (rc));
-			return false;
-		}
-
-/* extract out stream and data state like RFA */
-		final State state = CodecFactory.createState();
 		switch (msg.msgClass()) {
+		case MsgClasses.CLOSE:
+			return this.OnLoginClosed (c, it, msg);
+
 		case MsgClasses.REFRESH:
-			state.streamState (((LoginRefresh)response).state().streamState());
-			state.dataState (((LoginRefresh)response).state().dataState());
+			state = ((RefreshMsg)msg).state();
 			break;
 
 		case MsgClasses.STATUS:
-			state.streamState (((LoginStatus)response).state().streamState());
-			state.dataState (((LoginStatus)response).state().dataState());
+			state = ((StatusMsg)msg).state();
 			break;
 
-		case MsgClasses.CLOSE:
-			state.streamState (StreamStates.CLOSED);
-			break;
-
-		case MsgClasses.REQUEST:
-		case MsgClasses.POST:
-		case MsgClasses.ACK:
 		default:
 			LOG.warn ("Uncaught: {}", msg);
+			return true;
 		}
 
+		assert (null != state);
+
+/* extract out stream and data state like RFA */
 		switch (state.streamState()) {
 		case StreamStates.OPEN:
 			switch (state.dataState()) {
 			case DataStates.OK:
-				return this.OnLoginSuccess (c, response);
+				return this.OnLoginSuccess (c, it, msg);
 			case DataStates.SUSPECT:
-				return this.OnLoginSuspect (c, response);
+				return this.OnLoginSuspect (c, it, msg);
 			case DataStates.NO_CHANGE:
 // by-definition, ignore
 				return true;
@@ -2212,7 +2199,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			}
 
 		case StreamStates.CLOSED:
-			return this.OnLoginClosed (c, response);
+			return this.OnLoginClosed (c, it, msg);
 
 		default:
 			LOG.warn ("Uncaught stream state: {}", msg);
@@ -2299,34 +2286,24 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	}
 
 	private boolean OnDictionary (Channel c, DecodeIterator it, Msg msg) {
-		final DictionaryMsg response = DictionaryMsgFactory.createMsg();
-
 		LOG.debug ("OnDictionary");
 
-/*		switch (msg.msgClass()) {
-		case MsgClasses.REFRESH:	response.rdmMsgType (DictionaryMsgType.REFRESH); break;
-		case MsgClasses.STATUS:		response.rdmMsgType (DictionaryMsgType.STATUS); break;
-		case MsgClasses.CLOSE:		response.rdmMsgType (DictionaryMsgType.CLOSE); break;
-		default: return false;
-		} */
+		if (MsgClasses.REFRESH != msg.msgClass()) {
+/* Status can show a new dictionary but is not implemented in TREP-RT infrastructure, so ignore. */
+/* Close should only happen when the infrastructure is in shutdown, defer to closed MMT_LOGIN. */
+			LOG.warn ("Uncaught dictionary response message type: {}", msg);
+			return true;
+		}
+
+		final DictionaryMsg response = DictionaryMsgFactory.createMsg();
+		response.rdmMsgType (DictionaryMsgType.REFRESH);
 		final int rc = response.decode (it, msg);
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.warn ("DictionaryMsg.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
 				rc, CodecReturnCodes.toString (rc));
 			return false;
 		}
-
-		switch (response.rdmMsgType()) {
-		case REFRESH:
-			return this.OnDictionaryRefresh (c, it, (DictionaryRefresh)response);
-/* Status can show a new dictionary but is not implemented in TREP-RT infrastructure, so ignore. */
-		case STATUS:
-/* Close should only happen when the infrastructure is in shutdown, defer to closed MMT_LOGIN. */
-		case CLOSE:
-		default:
-			LOG.warn ("Uncaught dictionay response message type: {}", msg);
-			return true;
-		}
+		return this.OnDictionaryRefresh (c, it, (DictionaryRefresh)response);
 	}
 
 /* thunk to app object for private stream processing. */
@@ -2384,14 +2361,46 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		return true;
 	}
 
-	private boolean OnLoginSuccess (Channel c, LoginMsg response) {
+	private boolean OnLoginSuccess (Channel c, DecodeIterator it, Msg msg) {
 		LOG.debug ("OnLoginSuccess");
 /* Log upstream application name, only presented in refresh messages. */
-		switch (response.rdmMsgType()) {
-		case REFRESH:
-			if (0 != (((LoginRefresh)response).attrib().flags() & LoginAttribFlags.HAS_APPLICATION_NAME)) {
-				final LoginRefresh refresh = (LoginRefresh)response;
-				LOG.info ("applicationName: \"{}\"", refresh.attrib().applicationName());
+		switch (msg.msgClass()) {
+		case MsgClasses.REFRESH:
+			if (0 != (msg.flags() & RefreshMsgFlags.HAS_MSG_KEY)) {
+				final MsgKey msg_key = msg.msgKey();
+				if (0 != (msg_key.flags() & MsgKeyFlags.HAS_ATTRIB)) {
+					int rc = msg.decodeKeyAttrib (it, msg_key);
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("Msg.decodeKeyAttrib: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+					final ElementList element_list = CodecFactory.createElementList();
+					rc = element_list.decode (it, null /* local definitions */);
+					if (CodecReturnCodes.SUCCESS != rc) {
+						LOG.warn ("ElementList.decode: { \"returnCode\": {}, \"enumeration\": \"{}\" }",
+							rc, CodecReturnCodes.toString (rc));
+						return false;
+					}
+					final ElementEntry element_entry = CodecFactory.createElementEntry();
+					for (;;) {
+						rc = element_entry.decode (it);
+						if (CodecReturnCodes.END_OF_CONTAINER == rc
+							|| CodecReturnCodes.SUCCESS != rc)
+						{
+							break;
+						}
+						if (element_entry.name().equals (ElementNames.APPNAME)) {
+							if (DataTypes.ASCII_STRING != element_entry.dataType()) {
+								LOG.warn ("Element entry APPNAME not expected data type ASCII_STRING.");
+								return false;
+							}
+							final Buffer buffer = element_entry.encodedData();
+							LOG.info ("applicationName: \"{}\"", buffer.toString());
+							break;
+						}
+					}
+				}
 			}
 		default:
 			break;
@@ -2400,13 +2409,13 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		return this.SendDirectoryRequest (c);
 	}
 
-	private boolean OnLoginSuspect (Channel c, LoginMsg response) {
+	private boolean OnLoginSuspect (Channel c, DecodeIterator it, Msg msg) {
 		LOG.debug ("OnLoginSuspect");
 		this.is_muted = true;
 		return true;
 	}
 
-	private boolean OnLoginClosed (Channel c, LoginMsg response) {
+	private boolean OnLoginClosed (Channel c, DecodeIterator it, Msg msg) {
 		LOG.debug ("OnLoginClosed");
 		this.is_muted = true;
 		return true;
