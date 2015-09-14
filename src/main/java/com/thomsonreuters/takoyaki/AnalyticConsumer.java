@@ -901,18 +901,19 @@ request.qos().timeInfo (0);
 				return false;
 			}
 /* response includes a dictionary to decode the series data */
-			final LocalFieldSetDefDb local_dictionary;
+			LocalFieldSetDefDb local_dictionary = null;
 			if (0 != (series.flags() & SeriesFlags.HAS_SET_DEFS)) {
 				LOG.trace ("Response includes local dictionary.");
 				local_dictionary = CodecFactory.createLocalFieldSetDefDb();
 				rc = local_dictionary.decode (it);
-				if (CodecReturnCodes.SUCCESS != rc) {
+/* SET_DEF_DB_EMPTY implies an empty response */
+				if (CodecReturnCodes.SET_DEF_DB_EMPTY == rc) {
+					LOG.trace ("A Set Definition Database decoded successfully but contained no definitions.");
+				} else if (CodecReturnCodes.SUCCESS != rc) {
 					LOG.error ("LocalFieldSetDefDb.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 					return false;
 				}
-			} else {
-				local_dictionary = null;
 			}
 			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
 			final FieldList field_list = CodecFactory.createFieldList();
