@@ -804,6 +804,7 @@ request.qos().timeInfo (0);
 
 		private boolean OnHistory (Channel c, DecodeIterator it, Msg msg) {
 			LOG.trace ("OnHistory: {}", msg);
+LOG.trace ("{}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			if (DataTypes.MSG != msg.containerType()) {
 				LOG.warn ("Unexpected container type in HISTORY response.");
 				return false;
@@ -887,7 +888,10 @@ request.qos().timeInfo (0);
 				this.destroyItemStream (stream);
 				return false;
 			}
+			final FieldList field_list = CodecFactory.createFieldList();
+			final FieldEntry field_entry = CodecFactory.createFieldEntry();
 			final Series series = CodecFactory.createSeries();
+			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
 			int rc = series.decode (it);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.error ("Series.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
@@ -915,9 +919,6 @@ request.qos().timeInfo (0);
 					return false;
 				}
 			}
-			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
-			final FieldList field_list = CodecFactory.createFieldList();
-			final FieldEntry field_entry = CodecFactory.createFieldEntry();
 			final com.thomsonreuters.upa.codec.Real rssl_real = CodecFactory.createReal();
 			final com.thomsonreuters.upa.codec.UInt rssl_uint = CodecFactory.createUInt();
 			final com.thomsonreuters.upa.codec.Enum rssl_enum = CodecFactory.createEnum();
@@ -926,9 +927,12 @@ request.qos().timeInfo (0);
 			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
 			DictionaryEntry dictionary_entry;
 			for (;;) {
+				LOG.trace ("SeriesEntry");
 				rc = series_entry.decode (it);
-				if (CodecReturnCodes.END_OF_CONTAINER == rc)
+				if (CodecReturnCodes.END_OF_CONTAINER == rc) {
+					LOG.trace ("End of series container.");
 					break;
+				}
 				if (CodecReturnCodes.SUCCESS != rc) {
 					LOG.error ("SeriesEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
@@ -948,15 +952,19 @@ request.qos().timeInfo (0);
 				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
 				String row = null;
 				for (;;) {
+					LOG.trace ("FieldEntry");
 					rc = field_entry.decode (it);
-					if (CodecReturnCodes.END_OF_CONTAINER == rc)
+					if (CodecReturnCodes.END_OF_CONTAINER == rc) {
+						LOG.trace ("End of FieldList container.");
 						break;
+					}
 					if (CodecReturnCodes.SUCCESS != rc) {
 						LOG.error ("FieldEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 							rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 						return false;
 					}
 					dictionary_entry = rdm_dictionary.entry (field_entry.fieldId());
+LOG.trace ("{}: {}", field_entry.fieldId(), dictionary_entry.rwfType());
 					switch (field_entry.fieldId()) {
 					case 9217: // ITVL_DATE
 						if (DataTypes.DATE == dictionary_entry.rwfType()) {
