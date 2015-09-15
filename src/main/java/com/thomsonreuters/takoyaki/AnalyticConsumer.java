@@ -584,7 +584,7 @@ request.qos().timeInfo (0);
 				return false;
 			}
 // optional: MAX_POINTS
-			rssl_int.value (100);
+			rssl_int.value (3);
 			field_entry.dataType (DataTypes.INT);
 			field_entry.fieldId (7040);
 			rc = field_entry.encode (it, rssl_int);
@@ -618,7 +618,8 @@ request.qos().timeInfo (0);
 					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 				return false;
 			}
-	
+
+LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()));	
 /* Message validation. */
 			if (!wrapper.validateMsg()) {
 				LOG.error ("RequestMsg.validateMsg failed.");
@@ -711,7 +712,6 @@ request.qos().timeInfo (0);
 
 		private boolean OnHistory (Channel c, DecodeIterator it, Msg msg) {
 			LOG.trace ("OnHistory: {}", msg);
-LOG.trace ("{}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			if (DataTypes.MSG != msg.containerType()) {
 				LOG.warn ("Unexpected container type in HISTORY response.");
 				return false;
@@ -811,12 +811,9 @@ LOG.trace ("{}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
 			DictionaryEntry dictionary_entry;
 			for (;;) {
-				LOG.trace ("SeriesEntry");
 				rc = series_entry.decode (it);
-				if (CodecReturnCodes.END_OF_CONTAINER == rc) {
-					LOG.trace ("End of series container.");
+				if (CodecReturnCodes.END_OF_CONTAINER == rc)
 					break;
-				}
 				if (CodecReturnCodes.SUCCESS != rc) {
 					LOG.error ("SeriesEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
@@ -836,19 +833,15 @@ LOG.trace ("{}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
 				String row = null;
 				for (;;) {
-					LOG.trace ("FieldEntry");
 					rc = field_entry.decode (it);
-					if (CodecReturnCodes.END_OF_CONTAINER == rc) {
-						LOG.trace ("End of FieldList container.");
+					if (CodecReturnCodes.END_OF_CONTAINER == rc)
 						break;
-					}
 					if (CodecReturnCodes.SUCCESS != rc) {
 						LOG.error ("FieldEntry.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 							rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 						return false;
 					}
 					dictionary_entry = rdm_dictionary.entry (field_entry.fieldId());
-LOG.trace ("{}: {}", field_entry.fieldId(), dictionary_entry.rwfType());
 					switch (field_entry.fieldId()) {
 					case 9217: // ITVL_DATE
 						if (DataTypes.DATE == dictionary_entry.rwfType()) {
@@ -984,7 +977,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 		private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
 			if (LOG.isDebugEnabled()) {
-				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
+// FIXME: disable until serialization fixed for series dictionary
+//				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			}
 
 			State state = null;
@@ -1794,15 +1788,8 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 				} else {
 					LOG.debug ("Msg.ValidateMsg success.");
 				}
-/*				final DecodeIterator jt = CodecFactory.createDecodeIterator();
-				jt.clear();
-				rc = jt.setBufferAndRWFVersion (buf, c.majorVersion(), c.minorVersion());
-				if (CodecReturnCodes.SUCCESS != rc) {
-					LOG.error ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
-						rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
-					return false;
-				}
-				LOG.debug ("{}", msg.decodeToXml (jt)); */
+// FIXME: disable until serialization fixed for series dictionary
+//				this.DecodeToXml (msg, buf, c.majorVersion(), c.minorVersion());
 			}
 			if (!this.OnMsg (c, it, msg))
 				this.Abort (c);
@@ -1815,15 +1802,30 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
  * an encapsulated message.
  */
 	private String DecodeToXml (Msg msg, int major_version, int minor_version) {
+		return this.DecodeToXml (msg, msg.encodedMsgBuffer(), major_version, minor_version);
+	}
+	private String DecodeToXml (Msg msg, Buffer buf, int major_version, int minor_version) {
 		final DecodeIterator it = CodecFactory.createDecodeIterator();
 		it.clear();
-		final int rc = it.setBufferAndRWFVersion (msg.encodedMsgBuffer(), major_version, minor_version);
+		final int rc = it.setBufferAndRWFVersion (buf, major_version, minor_version);
 		if (CodecReturnCodes.SUCCESS != rc) {
 			LOG.warn ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
 				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 			return "";
 		} else {
-			return msg.decodeToXml (it);
+			return msg.decodeToXml (it, this.rdm_dictionary);
+		}
+	}
+	private String DecodeToXml (Msg msg, TransportBuffer buf, int major_version, int minor_version) {
+		final DecodeIterator it = CodecFactory.createDecodeIterator();
+		it.clear();
+		final int rc = it.setBufferAndRWFVersion (buf, major_version, minor_version);
+		if (CodecReturnCodes.SUCCESS != rc) {
+			LOG.warn ("DecodeIterator.setBufferAndRWFVersion: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
+				rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
+			return "";
+		} else {
+			return msg.decodeToXml (it, this.rdm_dictionary);
 		}
 	}
 

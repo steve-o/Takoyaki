@@ -311,10 +311,10 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			return false;
 		}
 
-/* FIXME: preload analytic */
+/* FIXME: preload analytic, time range must be within last 4 weeks */
 		final Analytic analytic = new Analytic ("ELEKTRON_AUX_TEST", "History", "tas", "FB.O");
 		try {
-			final Interval interval = Interval.parse ("2015-06-11T05:00:00.000Z/P5D");
+			final Interval interval = Interval.parse ("2015-09-11T05:00:00.000Z/P5D");
 			analytic.setInterval (interval);
 		} catch (IllegalArgumentException e) {
 			LOG.catching (e);
