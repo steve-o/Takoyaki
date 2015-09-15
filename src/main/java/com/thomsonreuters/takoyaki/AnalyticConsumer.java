@@ -110,7 +110,6 @@ import com.thomsonreuters.upa.transport.WritePriorities;
 
 public class AnalyticConsumer implements ItemStream.Delegate {
 	private static Logger LOG = LogManager.getLogger (AnalyticConsumer.class.getName());
-	private static final Marker SHOGAKOTTO_MARKER = MarkerManager.getMarker ("SHOGAKOTTO");
 	private static final String LINE_SEPARATOR = System.getProperty ("line.separator");
 
 	private SessionConfig config;
@@ -209,7 +208,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 			this.stream_map = Maps.newLinkedHashMap();
 			this.resetStreamId();
 			this.private_stream = new ItemStream (this);
-			this.private_stream.token = 0;
+			this.private_stream.token = INVALID_STREAM_IDENTIFIER;
 			this.private_stream.setServiceName (service_name);
 			this.setPendingConnection();
 // Appears until infrastructure returns new close status to present.
@@ -236,14 +235,15 @@ request.domainType (DomainTypes.HISTORY);
 /* No view thus no payload. */
 			request.containerType (DataTypes.NO_DATA);
 /* Set the stream token, recycle for closed a stream. */
-			request.streamId (this.private_stream.token == 0 ? token : this.private_stream.token);
-LOG.debug ("private stream token {}", this.private_stream.token == 0 ? token : this.private_stream.token);
+			request.streamId (this.private_stream.token == INVALID_STREAM_IDENTIFIER ? token : this.private_stream.token);
+LOG.debug ("private stream token {}", this.private_stream.token == INVALID_STREAM_IDENTIFIER ? token : this.private_stream.token);
 
 /* In RFA lingo an attribute object */
 			request.msgKey().name().data (this.uuid);
 			request.msgKey().serviceId (service_map.get (this.private_stream.getServiceName()));
 			request.msgKey().flags (MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_SERVICE_ID);
 
+/* ASG implementation requires QoS parameter */
 request.flags (request.flags() | RequestMsgFlags.HAS_QOS);
 request.qos().dynamic (false);
 request.qos().rate (com.thomsonreuters.upa.codec.QosRates.TICK_BY_TICK);
@@ -1120,7 +1120,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		}
 
 		public boolean hasConnectionHandle() {
-			return 0 != this.private_stream.token;
+			return INVALID_STREAM_IDENTIFIER != this.private_stream.token;
 		}
 
 		public void sendConnectionRequest() {
@@ -1146,12 +1146,13 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 	private static final boolean DO_NOT_CACHE_BLANK_VALUE	= true;
 
 	private static final int MAX_MSG_SIZE			= 4096;
-	private static final int OMM_PAYLOAD_SIZE		= 5000;
 	private static final int GC_DELAY_MS			= 15000;
 	private static final int RESUBSCRIPTION_MS		= 180000;
+	private static final int DEFAULT_RSSL_PORT		= 14002;
 	private static final int DEFAULT_RETRY_TIMER_MS		= 60000;
 	private static final int DEFAULT_RETRY_LIMIT		= 0;
 	private static final int DEFAULT_STREAM_IDENTIFIER	= 1;
+	private static final int INVALID_STREAM_IDENTIFIER	= 0;
 
 	private static final String RSSL_PROTOCOL		= "rssl";
 
@@ -1333,7 +1334,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		addr.channelReadLocking (false);
 		addr.channelWriteLocking (false);
 		addr.unifiedNetworkInfo().address (this.config.getServers()[0]);
-		addr.unifiedNetworkInfo().serviceName (this.config.hasDefaultPort() ? this.config.getDefaultPort() : "14002");
+		addr.unifiedNetworkInfo().serviceName (this.config.hasDefaultPort() ? this.config.getDefaultPort() : Integer.toString (DEFAULT_RSSL_PORT));
 		addr.protocolType (Codec.protocolType());
 		addr.majorVersion (Codec.majorVersion());
 		addr.minorVersion (Codec.minorVersion());
@@ -1533,7 +1534,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		LOG.info ("channelInfo: { \"clientToServerPings\": {}, \"componentInfo\": {}, \"compressionThreshold\": {}, \"compressionType\": \"{}\", \"guaranteedOutputBuffers\": {}, \"maxFragmentSize\": {}, \"maxOutputBuffers\": {}, \"numInputBuffers\": {}, \"pingTimeout\": {}, \"priorityFlushStrategy\": \"{}\", \"serverToClientPings\": \"{}\", \"sysRecvBufSize\": {}, \"sysSendBufSize\": {} }",
 			info.clientToServerPings(), components.toString(), info.compressionThreshold(), info.compressionType(), CompressionTypes.toString (info.compressionType()), info.guaranteedOutputBuffers(), info.maxFragmentSize(), info.maxOutputBuffers(), info.numInputBuffers(), info.pingTimeout(), info.priorityFlushStrategy(), info.serverToClientPings(), info.sysRecvBufSize(), info.sysSendBufSize());
 /* First token aka stream id */
-		this.token = 1;
+		this.token = DEFAULT_STREAM_IDENTIFIER;
 		this.dictionary_tokens.clear();
 /* Derive expected RSSL ping interval from negotiated timeout. */
 		this.ping_interval = c.pingTimeout() / 3;
