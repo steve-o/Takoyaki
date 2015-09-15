@@ -43,72 +43,6 @@ import com.google.common.primitives.UnsignedBytes;
 import com.google.common.primitives.Shorts;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.reuters.rfa.common.Client;
-import com.reuters.rfa.common.Context;
-import com.reuters.rfa.common.Event;
-import com.reuters.rfa.common.EventQueue;
-import com.reuters.rfa.common.EventSource;
-import com.reuters.rfa.common.Handle;
-import com.reuters.rfa.dictionary.FidDef;
-import com.reuters.rfa.dictionary.FieldDictionary;
-import com.reuters.rfa.omm.OMMArray;
-import com.reuters.rfa.omm.OMMAttribInfo;
-import com.reuters.rfa.omm.OMMData;
-import com.reuters.rfa.omm.OMMDataBuffer;
-import com.reuters.rfa.omm.OMMDateTime;
-import com.reuters.rfa.omm.OMMElementEntry;
-import com.reuters.rfa.omm.OMMElementList;
-import com.reuters.rfa.omm.OMMEncoder;
-import com.reuters.rfa.omm.OMMEnum;
-import com.reuters.rfa.omm.OMMEntry;
-import com.reuters.rfa.omm.OMMFieldEntry;
-import com.reuters.rfa.omm.OMMFieldList;
-import com.reuters.rfa.omm.OMMFilterEntry;
-import com.reuters.rfa.omm.OMMFilterList;
-import com.reuters.rfa.omm.OMMIterable;
-import com.reuters.rfa.omm.OMMMap;
-import com.reuters.rfa.omm.OMMMapEntry;
-import com.reuters.rfa.omm.OMMMsg;
-import com.reuters.rfa.omm.OMMNumeric;
-import com.reuters.rfa.omm.OMMPool;
-import com.reuters.rfa.omm.OMMSeries;
-import com.reuters.rfa.omm.OMMState;
-import com.reuters.rfa.omm.OMMTypes;
-import com.reuters.rfa.omm.OMMQos;
-import com.reuters.rfa.omm.OMMQosReq;
-import com.reuters.rfa.rdm.RDMInstrument;
-import com.reuters.rfa.rdm.RDMMsgTypes;
-import com.reuters.rfa.rdm.RDMService;
-import com.reuters.rfa.session.Session;
-import com.reuters.rfa.session.TimerIntSpec;
-// RFA 7.5.1
-import com.reuters.rfa.session.omm.OMMConnectionEvent;
-import com.reuters.rfa.session.omm.OMMConnectionIntSpec;
-import com.reuters.rfa.session.omm.OMMConsumer;
-import com.reuters.rfa.session.omm.OMMErrorIntSpec;
-import com.reuters.rfa.session.omm.OMMHandleItemCmd;
-import com.reuters.rfa.session.omm.OMMItemEvent;
-import com.reuters.rfa.session.omm.OMMItemIntSpec;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionary;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryCache;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryRequest;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryRequestAttrib;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.dictionary.RDMDictionaryResponse;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectory;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryRequest;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryRequestAttrib;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryResponse;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.RDMDirectoryResponsePayload;
-//import com.thomsonreuters.rfa.valueadd.domainrep.rdm.directory.Service;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLogin;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLoginRequest;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLoginRequestAttrib;
-import com.thomsonreuters.rfa.valueadd.domainrep.rdm.login.RDMLoginResponse;
-import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLogin;
-import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginRequest;
-import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginRequestAttrib;
-import com.thomsonreuters.rfa.valueadd.domainrep.app.login.AppLoginResponse;
-import com.thomsonreuters.rfa.valueadd.domainrep.ResponseStatus;
 import com.thomsonreuters.upa.codec.Buffer;
 import com.thomsonreuters.upa.codec.Codec;
 import com.thomsonreuters.upa.codec.CodecFactory;
@@ -191,14 +125,6 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 /* unique id per connection. */
 	private String prefix;
 
-/* RFA session defines one or more connections for horizontal scaling. */
-	private Session session;
-
-/* RFA OMM consumer interface. */
-	private OMMConsumer omm_consumer;
-	private OMMPool omm_pool;
-	private OMMEncoder omm_encoder, omm_encoder2;
-
 	private Set<Integer> field_set;
 
 /* JSON serialisation */
@@ -263,10 +189,6 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 /* ERROR: modifier 'static' is only allowed in constant variable declarations */
 		private Logger LOG = LogManager.getLogger (App.class.getName());
 
-		private OMMConsumer omm_consumer;
-		private OMMPool omm_pool;
-		private OMMEncoder omm_encoder;
-		private OMMEncoder omm_encoder2;
 		private String service_name;
 		private String app_name;
 		private String uuid;
@@ -454,8 +376,8 @@ request.qos().timeInfo (0);
 		}
 
 		private void registerRetryTimer (AnalyticStream stream, int retry_timer_ms) {
-			final TimerIntSpec timer = new TimerIntSpec();
-			timer.setDelay (retry_timer_ms);
+//			final TimerIntSpec timer = new TimerIntSpec();
+//			timer.setDelay (retry_timer_ms);
 //			final Handle timer_handle = this.omm_consumer.registerClient (this.event_queue, timer, this, stream);
 //			if (timer_handle.isActive())
 //				stream.setTimerHandle (timer_handle);
@@ -478,7 +400,7 @@ request.qos().timeInfo (0);
 			this.streams.remove (stream);
 			this.stream_map.remove (stream.getStreamId());
 			if (stream.hasTimerHandle()) {
-				this.omm_consumer.unregisterClient (stream.getTimerHandle());
+//				this.omm_consumer.unregisterClient (stream.getTimerHandle());
 				stream.clearTimerHandle();
 				stream.clearRetryCount();
 			}
@@ -717,22 +639,13 @@ request.qos().timeInfo (0);
 				return;
 			}
 			LOG.trace ("Sending analytic query close request.");
-			OMMMsg msg = this.omm_pool.acquireMsg();
-			msg.setStreamId (stream.getStreamId());
-			msg.setMsgType (OMMMsg.MsgType.REQUEST);
-			msg.setMsgModelType ((short)30 /* RDMMsgTypes.ANALYTICS */);
-//			msg.setAssociatedMetaInfo (this.private_stream);
 /* RFA 7.6.0.L1 bug translates this to a NOP request which Signals interprets as a close.
  * RsslRequestFlags = 0x20 = RSSL_RQMF_NO_REFRESH
  * Indicates that the user does not require an RsslRefreshMsg for this request
  * - typically used as part of a reissue to change priority, view information,
  *   or pausing/resuming a stream. 
  */
-			msg.setIndicationFlags (OMMMsg.Indication.PAUSE_REQ);
-			msg.setAttribInfo (null, stream.getItemName(), (short)0x1 /* RIC */);
-
-//			stream.setCommandId (this.sendGenericMsg (msg, this.private_stream, stream));
-			this.omm_pool.releaseMsg (msg);
+//			msg.setIndicationFlags (OMMMsg.Indication.PAUSE_REQ);
 		}
 
 		@Override
@@ -748,15 +661,9 @@ request.qos().timeInfo (0);
 		}
 
 /* Raise request timeout */
-		private void OnTimerEvent (Event event) {
-			LOG.trace ("OnTimerEvent: {}", event);
-			final AnalyticStream stream = (AnalyticStream)event.getClosure();
-/* timer should be closed by RFA when non-repeating. */
-			if (event.isEventStreamClosed()) {
-				LOG.trace ("Timer handle for \"{}\" is closed.", stream.getQuery());
-			} else if (null != stream.getTimerHandle()) {
-				this.omm_consumer.unregisterClient (stream.getTimerHandle());
-			}
+		private void OnTimerEvent() {
+			LOG.trace ("OnTimerEvent: {}");
+			final AnalyticStream stream = null;
 /* no retry if private stream is not available */
 			if (this.pending_connection) {
 //				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
@@ -850,29 +757,6 @@ LOG.trace ("{}", DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 				this.text = text;
 			}
 		}
-
-	private static final boolean TEST_RWF15_TIME_ENCODING	= false;
-	private static final boolean USE_RWF15_TIME_ENCODING	= false;
-
-	private OMMMsg CreateTestMsg() {
-		omm_encoder.initialize(OMMTypes.MSG, 500);
-		OMMMsg msg = omm_pool.acquireMsg();
-		msg.setMsgType(OMMMsg.MsgType.UPDATE_RESP);
-		msg.setMsgModelType(RDMMsgTypes.MARKET_PRICE);
-		msg.setIndicationFlags(OMMMsg.Indication.DO_NOT_CONFLATE);
-		msg.setRespTypeNum(RDMInstrument.Update.QUOTE);
-		omm_encoder.encodeMsgInit(msg, OMMTypes.NO_DATA, OMMTypes.SERIES);
-		omm_encoder.encodeSeriesInit(OMMSeries.HAS_TOTAL_COUNT_HINT, OMMTypes.FIELD_LIST, 1);
-		omm_encoder.encodeSeriesEntryInit();
-		omm_encoder.encodeFieldListInit(OMMFieldList.HAS_STANDARD_DATA, (short)0, (short)1, (short)0);
-		omm_encoder.encodeFieldEntryInit((short)14223, OMMTypes.TIME);
-		omm_encoder.encodeTime(23, 59, 58, 123, 999, 512);
-// special blank values
-//		omm_encoder.encodeTime(255, 255, 255, 65535, 2047, 2047);
-		omm_encoder.encodeAggregateComplete();
-		omm_encoder.encodeAggregateComplete();
-		return (OMMMsg)omm_encoder.getEncodedObject();
-	}
 
 /* Elektron Time Series refresh */
 		private boolean OnHistoryRefresh (Channel c, DecodeIterator it, RefreshMsg msg) {
@@ -1798,8 +1682,8 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 /* Cannot decode responses so do not allow wire subscriptions until dictionary is present */
 		if (this.pending_dictionary)
 			return;
-		if (null == this.omm_consumer) {
-			LOG.warn ("Resubscribe whilst consumer is invalid.");
+		if (null == this.connection) {
+			LOG.warn ("Resubscribe whilst connection is invalid.");
 			return;
 		}
 
@@ -2810,353 +2694,6 @@ LOG.debug ("dictionary token {}", this.token);
 			return true;
 		}
 	}
-
-	public void processEvent (Event event) {
-		LOG.trace (event);
-		switch (event.getType()) {
-		case Event.OMM_ITEM_EVENT:
-			this.OnOMMItemEvent (this.connection, (OMMItemEvent)event);
-			break;
-
-// RFA 7.5.1
-		case Event.OMM_CONNECTION_EVENT:
-			this.OnConnectionEvent ((OMMConnectionEvent)event);
-			break;
-
-		default:
-			LOG.trace ("Uncaught: {}", event);
-			break;
-		}
-	}
-
-/* Handling Item Events, message types are munged c.f. C++ API.
- */
-	private void OnOMMItemEvent (Channel c, OMMItemEvent event) {
-		LOG.trace ("OnOMMItemEvent: {}", event);
-		final OMMMsg msg = event.getMsg();
-
-/* Verify event is a response event. */
-		switch (msg.getMsgType()) {
-		case OMMMsg.MsgType.REFRESH_RESP:
-		case OMMMsg.MsgType.UPDATE_RESP:
-		case OMMMsg.MsgType.STATUS_RESP:
-		case OMMMsg.MsgType.ACK_RESP:
-			this.OnRespMsg (c, msg, event.getHandle(), event.getClosure());
-			break;
-
-/* Generic message */
-		case OMMMsg.MsgType.GENERIC:
-/* Request message */
-		case OMMMsg.MsgType.REQUEST:
-/* Post message */
-		case OMMMsg.MsgType.POST:
-		default:
-			LOG.trace ("Uncaught: {}", msg);
-			break;
-		}
-	}
-
-	private void OnRespMsg (Channel c, OMMMsg msg, Handle handle, Object closure) {
-		LOG.trace ("OnRespMsg: {}", msg);
-		switch (msg.getMsgModelType()) {
-		case RDMMsgTypes.LOGIN:
-			this.OnLoginResponse (c, msg);
-			break;
-
-		case RDMMsgTypes.DIRECTORY:
-			this.OnDirectoryResponse (c, msg);
-			break;
-
-		case RDMMsgTypes.DICTIONARY:
-			this.OnDictionaryResponse (c, msg, handle, closure);
-			break;
-
-		case RDMMsgTypes.MARKET_PRICE:
-			this.OnMarketPrice (c, msg);
-			break;
-
-		default:
-			LOG.trace ("Uncaught: {}", msg);
-			break;
-		}
-	}
-
-	private void OnLoginResponse (Channel c, OMMMsg msg) {
-		LOG.trace ("OnLoginResponse: {}", msg);
-		if (LOG.isDebugEnabled()) {
-			ByteArrayOutputStream baos = new ByteArrayOutputStream();
-			PrintStream ps = new PrintStream (baos);
-			GenericOMMParser.parseMsg (msg, ps);
-			LOG.debug ("Login response:{}{}", LINE_SEPARATOR, baos.toString());
-		}
-		final RDMLoginResponse response = new RDMLoginResponse (msg);
-		final byte stream_state = response.getRespStatus().getStreamState();
-		final byte data_state	= response.getRespStatus().getDataState();
-
-		switch (stream_state) {
-		case OMMState.Stream.OPEN:
-			switch (data_state) {
-			case OMMState.Data.OK:
-				this.OnLoginSuccess (c, response);
-				break;
-
-			case OMMState.Data.SUSPECT:
-				this.OnLoginSuspect (c, response);
-				break;
-
-			default:
-				LOG.trace ("Uncaught data state: {}", response);
-				break;
-			}
-			break;
-
-		case OMMState.Stream.CLOSED:
-			this.OnLoginClosed (c, response);
-			break;
-
-		default:
-			LOG.trace ("Uncaught stream state: {}", response);
-			break;
-		}
-	}
-
-/* Login Success.
- */
-	private void OnLoginSuccess (Channel c, RDMLoginResponse response) {
-		LOG.trace ("OnLoginSuccess: {}", response);
-		LOG.trace ("Unmuting consumer.");
-		this.is_muted = false;
-		if (!this.pending_dictionary)
-			this.Resubscribe();
-	}
-
-/* Other Login States.
- */
-	private void OnLoginSuspect (Channel c, RDMLoginResponse response) {
-		LOG.trace ("OnLoginSuspect: ResponseStatus: {}", response.getRespStatus());
-		this.is_muted = true;
-	}
-
-/* Login Closed.
- */
-	private void OnLoginClosed (Channel c, RDMLoginResponse response) {
-		LOG.trace ("OnLoginClosed: {}", response);
-		this.is_muted = true;
-	}
-
-/* MMT_DIRECTORY domain.  Request RDM dictionaries, RWFFld and RWFEnum, from first available service.
- */
-	private void OnDirectoryResponse (Channel c, OMMMsg msg) {
-		LOG.trace ("OnDirectoryResponse: {}", msg);
-		if (LOG.isDebugEnabled()) {
-			ByteArrayOutputStream baos = new ByteArrayOutputStream();
-			PrintStream ps = new PrintStream (baos);
-			GenericOMMParser.parseMsg (msg, ps);
-			LOG.debug ("Directory response:{}{}", LINE_SEPARATOR, baos.toString());
-		}
-
-// We only desire a single directory response with UP status to request dictionaries, ignore all other updates */
-		if (!this.pending_directory)
-			return;
-
-/* RFA 7.5.1.L1 raises invalid exception for Elektron Edge directory response due to hard coded capability validation. */
-		final RDMDirectoryResponse response = new RDMDirectoryResponse (msg);
-		if (!response.hasPayload()) {
-			LOG.trace ("Ignoring directory response due to no payload.");
-			return;
-		}
-
-		final RDMDirectoryResponsePayload payload = response.getPayload();
-		if (!payload.hasServiceList()) {
-			LOG.trace ("Ignoring directory response due to no service list.");
-			return;
-		}
-
-/* Find /a/ service to request dictionary from.  It doesn't matter which as the ADS is
- * providing its own dictionary overriding anything from the provider.
- */
-		String dictionary_service = null;
-		int dictionary_service_id = 0;
-/*		for (Service service : payload.getServiceList()) {
-			if (!service.hasServiceName()) {
-				LOG.trace ("Ignoring listed service due to empty name.");
-				continue;
-			}
-			if (!service.hasAction()) {
-				LOG.trace ("{}: Ignoring service due to no map action {ADD|UPDATE|DELETE}.", service.getServiceName());
-				continue;
-			}
-			if (RDMDirectory.ServiceAction.DELETE == service.getAction()) {
-				LOG.trace ("{}: Ignoring service being deleted.", service.getServiceName());
-				continue;
-			}
-			if (!service.hasStateFilter()) {
-				LOG.trace ("{}: Ignoring service with no state filter as service may be unavailable.", service.getServiceName());
-				continue;
-			}
-			final Service.StateFilter state_filter = service.getStateFilter();
-			if (state_filter.hasServiceUp()) {
-				if (state_filter.getServiceUp()) {
-					if (state_filter.getAcceptingRequests()) {
-						dictionary_service = service.getServiceName();
-						break;
-					} else {
-						LOG.trace ("{}: Ignoring service as directory indicates it is not accepting requests.", service.getServiceName());
-						continue;
-					}
-				} else {
-					LOG.trace ("{}: Ignoring service marked as not-up.", service.getServiceName());
-					continue;
-				}
-			} else {
-				LOG.trace ("{}: Ignoring service without service state indicator.", service.getServiceName());
-				continue;
-			}
-		} */
-
-		if (Strings.isNullOrEmpty (dictionary_service)) {
-			LOG.trace ("No service available to accept dictionary requests, waiting for service change in directory update.");
-			return;
-		}
-
-/* Hard code to RDM dictionary names */
-//		if (!this.dictionary_handle.containsKey ("RWFFld")) {
-/* Local file override */
-			if (!this.config.hasFieldDictionary()) {
-				this.SendDictionaryRequest (c, dictionary_service_id, "RWFFld");
-			} else {
-final FieldDictionary field_dictionary = null;
-//				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
-				FieldDictionary.readRDMFieldDictionary (field_dictionary, this.config.getFieldDictionary());
-/* Additional meta-data only from file dictionaries */
-				LOG.trace ("RDM field dictionary file \"{}\": { " +
-						  "\"Desc\": \"{}\"" +
-						", \"Version\": \"{}\"" +
-						", \"Build\": \"{}\"" +
-						", \"Date\": \"{}\"" +
-						" }",
-						this.config.getFieldDictionary(),
-						field_dictionary.getFieldProperty ("Desc"),
-						field_dictionary.getFieldProperty ("Version"),
-						field_dictionary.getFieldProperty ("Build"),
-						field_dictionary.getFieldProperty ("Date"));
-			}
-//		}
-
-//		if (!this.dictionary_handle.containsKey ("RWFEnum")) {
-			if (!this.config.hasEnumDictionary()) {
-				this.SendDictionaryRequest (c, dictionary_service_id, "RWFEnum");
-			} else {
-final FieldDictionary field_dictionary = null;
-//				final FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
-				FieldDictionary.readEnumTypeDef (field_dictionary, this.config.getEnumDictionary());
-				LOG.trace ("RDM enumerated tables file \"{}\": { " +
-						  "\"Desc\": \"{}\"" +
-						", \"RT_Version\": \"{}\"" +
-						", \"Build_RDMD\": \"{}\"" +
-						", \"DT_Version\": \"{}\"" +
-						", \"Date\": \"{}\"" +
-						" }",
-						this.config.getEnumDictionary(),
-						field_dictionary.getEnumProperty ("Desc"),
-						field_dictionary.getEnumProperty ("RT_Version"),
-						field_dictionary.getEnumProperty ("Build_RDMD"),
-						field_dictionary.getEnumProperty ("DT_Version"),
-						field_dictionary.getEnumProperty ("Date"));
-			}
-//		}
-
-//		if (0 == this.dictionary_handle.size()) {
-			if (LOG.isDebugEnabled()) {
-//				GenericOMMParser.initializeDictionary (this.rdm_dictionary.getFieldDictionary());
-			}
-			LOG.trace ("All dictionaries loaded, resuming subscriptions.");
-			this.pending_dictionary = false;
-			this.Resubscribe();
-//		}
-
-/* Directory received and processed, ignore all future updates. */
-		this.pending_directory = false;
-	}
-
-/* MMT_DICTIONARY domain.
- *
- * 5.8.4 Streaming Dictionary
- * Dictionary request can be streaming. Dictionary providers are not allowed to
- * send refresh and update data to consumers.  Instead the provider can
- * advertise a minor Dictionary change by sending a status (Section 2.2)
- * response message with a DataState of Suspect. It is the consumer’s
- * responsibility to reissue the dictionary request.
- */
-	private void OnDictionaryResponse (Channel c, OMMMsg msg, Handle handle, Object closure) {
-		LOG.trace ("OnDictionaryResponse: {}", msg);
-		final RDMDictionaryResponse response = new RDMDictionaryResponse (msg);
-/* Receiving dictionary */
-		if (response.hasAttrib()) {
-			LOG.trace ("Dictionary {}: {}", response.getMessageType(), response.getAttrib().getDictionaryName());
-		}
-		if (response.getMessageType() == RDMDictionaryResponse.MessageType.REFRESH_RESP
-			&& response.hasPayload() && null != response.getPayload())
-		{
-//			this.rdm_dictionary.load (response.getPayload(), handle);
-		}
-
-/* Only know type after it is loaded. */
-final RDMDictionary.DictionaryType dictionary_type = null;
-//		final RDMDictionary.DictionaryType dictionary_type = this.rdm_dictionary.getDictionaryType (handle);
-
-/* Received complete dictionary */
-		if (response.getMessageType() == RDMDictionaryResponse.MessageType.REFRESH_RESP
-			&& response.getIndicationMask().contains (RDMDictionaryResponse.IndicationMask.REFRESH_COMPLETE))
-		{
-			LOG.trace ("Dictionary complete.");
-/* Check dictionary version */
-FieldDictionary field_dictionary = null;
-//			FieldDictionary field_dictionary = this.rdm_dictionary.getFieldDictionary();
-			if (RDMDictionary.DictionaryType.RWFFLD == dictionary_type)
-			{
-				LOG.trace ("RDM field definitions version: {}", field_dictionary.getFieldProperty ("Version"));
-			}
-			else if (RDMDictionary.DictionaryType.RWFENUM == dictionary_type)
-			{
-/* Interesting values like Name, RT_Version, Description, Date are not provided by ADS */
-				LOG.trace ("RDM enumerated tables version: {}", field_dictionary.getEnumProperty ("DT_Version"));
-			}
-/* Notify RFA example helper of dictionary if using to dump message content. */
-			if (LOG.isDebugEnabled()) {
-				GenericOMMParser.initializeDictionary (field_dictionary);
-			}
-//			this.dictionary_handle.get ((String)closure).setFlag();
-
-/* Check all pending dictionaries */
-//			int pending_dictionaries = this.dictionary_handle.size();
-//			for (FlaggedHandle flagged_handle : this.dictionary_handle.values()) {
-//				if (flagged_handle.isFlagged())
-//					--pending_dictionaries;
-//			}
-//			if (0 == pending_dictionaries) {
-//				LOG.trace ("All used dictionaries loaded, resuming subscriptions.");
-//				this.pending_dictionary = false;
-//				this.Resubscribe();
-//			} else {
-//				LOG.trace ("Dictionaries pending: {}", pending_dictionaries);
-//			}
-		}
-	}
-
-// RFA 7.5.1
-	private void OnConnectionEvent (OMMConnectionEvent event) {
-		LOG.trace ("OnConnectionEvent: {}", event);
-		LOG.info ("Connection status {} for {}@{}:{}",
-				event.getConnectionStatus().toString(),
-				event.getConnectedComponentVersion(), event.getConnectedHostName(), event.getConnectedPort());
-	}
-
-/* MMT_MARKETPRICE domain.
- */
-	private void OnMarketPrice (Channel c, OMMMsg msg) {
-	}
-
 }
 
 /* eof */

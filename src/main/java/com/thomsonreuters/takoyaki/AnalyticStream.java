@@ -12,7 +12,6 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
 import com.google.gson.Gson;
-import com.reuters.rfa.common.Handle;
 import org.joda.time.Interval;
 
 public class AnalyticStream {
@@ -38,7 +37,7 @@ public class AnalyticStream {
 
 	private Optional<Integer> stream_id;
 	private int command_id;
-	private Handle timer_handle;
+	private Integer timer_handle;
 	private int retry_count;
 
 	private Table<String, String, String> fids;
@@ -136,7 +135,7 @@ public class AnalyticStream {
 		this.setCommandId (-1);
 	}
 
-	public Handle getTimerHandle() {
+	public Integer getTimerHandle() {
 		return this.timer_handle;
         }
                 
@@ -144,7 +143,7 @@ public class AnalyticStream {
 		return null != this.getTimerHandle();
 	}
                 
-	public void setTimerHandle (Handle timer_handle) {
+	public void setTimerHandle (Integer timer_handle) {
 		this.timer_handle = timer_handle;
 	}
                 

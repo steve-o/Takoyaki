@@ -123,19 +123,5 @@
       <scope>system</scope>
       <systemPath>${project.basedir}/third_party/upaj8.0.0.L1.all.rrg/Libs/upa.jar</systemPath>
     </dependency>
-    <dependency>
-      <groupId>com.reuters.rfa</groupId>
-      <artifactId>rfa</artifactId>
-      <version>8.0.0</version>
-      <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/rfaj8.0.0.L2.all.rrg/Libs/rfa.jar</systemPath>
-    </dependency>
-    <dependency>
-      <groupId>com.thomsonreuters.rfa.valueadd.domainrep</groupId>
-      <artifactId>valueadd-domainrep</artifactId>
-      <version>7.6.0</version>
-      <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/rfaj7.6.0.L1.all.rrg/ValueAdd/Source/DomainRep/Classes/ValueAdd_DomainRep.jar</systemPath>
-    </dependency>
   </dependencies>
 </project>

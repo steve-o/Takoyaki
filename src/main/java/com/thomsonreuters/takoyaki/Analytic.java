@@ -3,7 +3,6 @@
 
 package com.thomsonreuters.Takoyaki;
 
-import com.reuters.rfa.common.Handle;
 import com.google.gson.Gson;
 import org.joda.time.Interval; 
 

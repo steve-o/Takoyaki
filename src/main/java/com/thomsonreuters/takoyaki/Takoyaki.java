@@ -34,15 +34,6 @@ import org.joda.time.DateTimeZone;
 import org.joda.time.Duration;
 import org.joda.time.Interval;
 import org.joda.time.Period;
-import com.reuters.rfa.common.Context;
-import com.reuters.rfa.common.DeactivatedException;
-import com.reuters.rfa.common.Dispatchable;
-import com.reuters.rfa.common.DispatchException;
-import com.reuters.rfa.common.DispatchableNotificationClient;
-import com.reuters.rfa.common.EventQueue;
-import com.reuters.rfa.common.Handle;
-import com.reuters.rfa.config.ConfigDb;
-import com.reuters.rfa.session.Session;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -53,14 +44,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 /* Application configuration. */
 	private Config config;
 
-/* RFA context. */
-	private Rfa rfa;
-
 /* UPA context. */
 	private Upa upa;
-
-/* RFA asynchronous event queue. */
-	private EventQueue event_queue;
 
 /* RFA consumer */
 	private AnalyticConsumer analytic_consumer;
@@ -76,7 +61,6 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 	private HttpContext http_context;
 
 	private static Logger LOG = LogManager.getLogger (Takoyaki.class.getName());
-	private static Logger RFA_LOG = LogManager.getLogger ("com.reuters.rfa");
 
 	private static final String RSSL_PROTOCOL		= "rssl";
 
@@ -442,12 +426,10 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 		@Override
 		public void run() {
 			setName ("shutdown");
-			if (null != this.app
-				&& null != this.app.event_queue
-				&& this.app.event_queue.isActive())
+//			if (null != this.app)
+			if (false)
 			{
 				LOG.trace ("Deactivating event queue ...");
-				this.app.event_queue.deactivate();
 				LOG.trace ("Notifying mainloop ... ");
 				this.app.abort_sock.sendMore ("");
 				this.app.abort_sock.send ("abort");
@@ -487,37 +469,15 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 
 	public volatile boolean is_shutdown = false;
 
-	private class RfaDispatcher implements DispatchableNotificationClient {
-		private ZMQ.Socket sock;
-
-		public RfaDispatcher (ZMQ.Context zmq_context) {
-			this.sock = zmq_context.socket (ZMQ.DEALER);
-			this.sock.connect ("inproc://rfa");
-		}
-
-		public void reset() {
-			if (null != this.sock) {
-				this.sock.close();
-				this.sock = null;
-			}
-		}
-
-		@Override
-		public void notify (Dispatchable dispSource, java.lang.Object closure) {
-			this.sock.sendMore ("");
-			this.sock.send ("");
-		}
-	}
-
 	private void drainqueue() {
 		LOG.trace ("Draining event queue.");
 		int count = 0;
 		try {
-			while (this.event_queue.dispatch (Dispatchable.NO_WAIT) > 0) { ++count; }
+//			while (this.event_queue.dispatch (Dispatchable.NO_WAIT) > 0) { ++count; }
 			LOG.trace ("Queue contained {} events.", count);
-		} catch (DeactivatedException e) {
+//		} catch (DeactivatedException e) {
 /* ignore on empty queue */
-			if (count > 0) LOG.catching (e);
+//			if (count > 0) LOG.catching (e);
 		} catch (Exception e) {
 			LOG.catching (e);
 		}
