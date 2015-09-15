@@ -1623,38 +1623,6 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		LOG.trace ("App \"{}\" stream count: {}", analytic_stream.getAppName(), app.size());
 	}
 
-/* Convert a view by FID name to a view by FID values */
-	private ImmutableSortedSet<Integer> createViewByFid (ImmutableSortedSet<String> view_by_name) {
-		final ArrayList<Integer> fid_list = new ArrayList<Integer> (view_by_name.size());
-		for (String name : view_by_name) {
-			final Integer fid = this.appendix_a.get (name);
-			if (null == fid) {
-				LOG.error ("Field \"{}\" not described in appendix_a dictionary.", name);
-			} else {
-				fid_list.add (fid);
-			}
-		}
-		final Integer[] fid_array = fid_list.toArray (new Integer [fid_list.size()]);
-		return ImmutableSortedSet.copyOf (fid_array);
-	}
-
-/* Convert a set of FID names to psuedo ripple field names */
-	private ImmutableMap<Integer, String> createRippleFieldDictionary (ImmutableSortedSet<String> view_by_name) {
-		Map<Integer, String> map = Maps.newHashMap();
-		for (String name : view_by_name) {
-			final Integer fid = this.appendix_a.get (name);
-			if (null == fid) {
-				LOG.warn ("Field \"{}\" not described in appendix_a dictionary.", name);
-			} else {
-				this.sb.setLength (0);
-				this.sb.append (name)
-					.append ("_PRV");
-				map.put (fid, this.sb.toString());
-			}
-		}
-		return ImmutableMap.copyOf (map);
-	}
-
 	public boolean Resubscribe (Channel c) {
 		LOG.debug ("Resubscribe");
 		if (this.is_muted) {
@@ -1677,30 +1645,6 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		}
 
 		return true;
-	}
-
-	public void Resubscribe () {
-/* Cannot decode responses so do not allow wire subscriptions until dictionary is present */
-		if (this.pending_dictionary)
-			return;
-		if (null == this.connection) {
-			LOG.warn ("Resubscribe whilst connection is invalid.");
-			return;
-		}
-
-/* retry app streams */
-		for (App app : this.apps.values()) {
-			if (!app.hasConnectionHandle()) {
-				app.sendConnectionRequest();
-			}
-		}
-
-/* item streams */
-		for (ItemStream item_stream : this.directory) {
-			if (-1 == item_stream.token) {
-				this.sendItemRequest (this.connection, item_stream);
-			}
-		}
 	}
 
 	private void OnActiveReadState (Channel c) {
@@ -1866,6 +1810,10 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		}
 	}
 
+/* One can serialize from underlying transport buffer or inplace of .decode() operator.  This
+ * function requires a buffer backed message, will not work when encoding a message or extracting
+ * an encapsulated message.
+ */
 	private String DecodeToXml (Msg msg, int major_version, int minor_version) {
 		final DecodeIterator it = CodecFactory.createDecodeIterator();
 		it.clear();
