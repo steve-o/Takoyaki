@@ -1409,7 +1409,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 				LOG.info ("RSSL protocol downgrade, reconnected.");
 				state.oldSelectableChannel().keyFor (this.selector).cancel();
 				try {
-					c.selectableChannel().register (this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
+					c.selectableChannel().register (this.selector, SelectionKey.OP_CONNECT | SelectionKey.OP_READ | SelectionKey.OP_WRITE, Boolean.FALSE);
 				} catch (ClosedChannelException e) {
 					LOG.catching (e);
 				}
