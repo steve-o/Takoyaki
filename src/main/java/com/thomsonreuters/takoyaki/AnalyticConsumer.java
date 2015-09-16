@@ -243,7 +243,7 @@ LOG.debug ("private stream token {}", this.private_stream.token == INVALID_STREA
 			request.msgKey().serviceId (service_map.get (this.private_stream.getServiceName()));
 			request.msgKey().flags (MsgKeyFlags.HAS_NAME | MsgKeyFlags.HAS_SERVICE_ID);
 
-/* ASG implementation requires QoS parameter */
+/* TREP 3 infrastructure requires QoS parameter */
 request.flags (request.flags() | RequestMsgFlags.HAS_QOS);
 request.qos().dynamic (false);
 request.qos().rate (com.thomsonreuters.upa.codec.QosRates.TICK_BY_TICK);
@@ -1247,7 +1247,8 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 
 /* Only check keepalives on timeout */
 		if (null == this.out_keys
-			&& null != this.connection)
+			&& null != this.connection	/* before first connection attempt */
+			&& ChannelState.INACTIVE != this.connection.state())	/* not shutdown */
 		{
 			final Channel c = this.connection;
 			LOG.debug ("timeout, state {}", ChannelState.toString (c.state()));
@@ -1264,12 +1265,17 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		}
 
 /* Client connection */
-		if (null == this.connection) {
+		if (null == this.connection
+			|| ChannelState.INACTIVE == this.connection.state())
+		{
 			this.Connect();
-			did_work = true;
+/* In UPA/Java we return false in order to avoid timeout state on protocol downgrade. */
+			did_work = false;
 		}
 
-		if (null != this.connection && null != this.out_keys) {
+		if (null != this.connection
+			&& null != this.out_keys)
+		{
 			final Channel c = this.connection;
 			Iterator<SelectionKey> it = this.selector.selectedKeys().iterator();
 			while (it.hasNext()) {
@@ -1317,6 +1323,15 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		this.keep_running = false;
 	}
 
+	private int server_idx = -1;
+
+	private String server() {
+		this.server_idx++;
+		if (this.server_idx >= this.config.getServers().length)
+			this.server_idx = 0;
+		return this.config.getServers()[this.server_idx];
+	}
+
 	private void Connect() {
 		final ConnectOptions addr = TransportFactory.createConnectOptions();
 		final com.thomsonreuters.upa.transport.Error rssl_err = TransportFactory.createError();
@@ -1327,7 +1342,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		addr.blocking (false);
 		addr.channelReadLocking (false);
 		addr.channelWriteLocking (false);
-		addr.unifiedNetworkInfo().address (this.config.getServers()[0]);
+		addr.unifiedNetworkInfo().address (this.server());
 		addr.unifiedNetworkInfo().serviceName (this.config.hasDefaultPort() ? this.config.getDefaultPort() : Integer.toString (DEFAULT_RSSL_PORT));
 		addr.protocolType (Codec.protocolType());
 		addr.majorVersion (Codec.majorVersion());
@@ -1475,12 +1490,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 	}
 
 	private void Abort (Channel c) {
-		c.selectableChannel().keyFor (selector).cancel();
-		try {
-			c.selectableChannel().close();
-		} catch (IOException e) {
-			LOG.catching (e);
-		}
+		this.Close (c);
 	}
 
 	private void Close (Channel c) {
