@@ -857,10 +857,19 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 						if (DataTypes.TIME == dictionary_entry.rwfType()) {
 							final com.thomsonreuters.upa.codec.Time itvl_tm = CodecFactory.createTime();
 							itvl_tm.decode (it);
+try {
 							datetime = datetime.withHour (itvl_tm.hour())
 									.withMinute (itvl_tm.minute())
 									.withSecond (itvl_tm.second())
 									.withNano ((((itvl_tm.millisecond() * 1000) + itvl_tm.microsecond()) * 1000) + itvl_tm.nanosecond());
+} catch (java.time.DateTimeException e) {
+/* workaround encoding defect by saturating invalid values */
+	LOG.catching (e);
+	datetime = datetime.withHour (Math.min (itvl_tm.hour(), 23))
+			.withMinute (Math.min (itvl_tm.minute(), 59))
+			.withSecond (Math.min (itvl_tm.second(), 59))
+			.withNano ((((Math.min (itvl_tm.millisecond(), 999) * 1000) + Math.min (itvl_tm.microsecond(), 999)) * 1000) + Math.min (itvl_tm.nanosecond(), 999));
+}
 /* convert to get standard ISO 8601 Zulu "Z" suffix, otherwise "[UTC]" will apear */
 							row = '"' + datetime.toInstant().toString() + '"';
 						}
