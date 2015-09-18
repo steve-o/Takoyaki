@@ -11,6 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.*;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 // Java 8
@@ -114,6 +115,10 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 
 	private SessionConfig config;
 
+/* Reply socket to propagate events */
+	private SelectableChannel reply_channel;
+	private Delegate reply_delegate;
+
 /* UPA context. */
 	private Upa upa;
 /* This flag is set to false when Run should return. */
@@ -155,6 +160,12 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 	private ImmutableMap<String, Integer> appendix_a;
 
 	private Instant last_activity;
+
+/* Delegate handles specific behaviour of an worker reply. */
+	public interface Delegate {
+/* Return false on EAGAIN */
+		public boolean OnRead();
+	}
 
 	private Instant NextPing() {
 		return this.next_ping;
@@ -940,7 +951,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				sb.append ("]")
 				  .append ("}");
 				LOG.trace ("{}", sb.toString());
-//				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
+				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 				this.destroyItemStream (stream);
 			}
 
@@ -1159,8 +1170,10 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 
 	private static final String RSSL_PROTOCOL		= "rssl";
 
-	public AnalyticConsumer (SessionConfig config, Upa upa) {
+	public AnalyticConsumer (SessionConfig config, Upa upa, Delegate reply_delegate, SelectableChannel reply_channel) {
 		this.config = config;
+		this.reply_channel = reply_channel;
+		this.reply_delegate = reply_delegate;
 		this.upa = upa;
 		this.apps = Maps.newLinkedHashMap();
 		this.rwf_major_version = 0;
@@ -1210,6 +1223,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 	private Set<SelectionKey> out_keys;
 
 	public void Run() {
+		assert this.keep_running : "Quit must have been called outside of Run!";
 		LOG.trace ("Run");
 
 // throws IOException for undocumented reasons.
@@ -1223,6 +1237,15 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		}
 		this.out_keys = null;
 		final long timeout = 1000 * 100;
+
+/* Add external reply socket */
+		if (null != this.reply_channel) {
+			try {
+				this.reply_channel.register (this.selector, SelectionKey.OP_READ, Boolean.FALSE);
+			} catch (ClosedChannelException e) {
+				LOG.catching (e);
+			}
+		}
 
 		while (true) {
 			boolean did_work = DoWork();
@@ -1290,6 +1313,17 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			while (it.hasNext()) {
 				final SelectionKey key = it.next();
 				key.attach (Boolean.TRUE);
+
+/* External socket event */
+				if (null != this.reply_channel
+					&& key.channel() == this.reply_channel
+					&& key.isReadable())
+				{
+					if (!this.reply_delegate.OnRead())
+						it.remove();
+					did_work = true;
+					continue;
+				}
 /* connected */
 				if (key.isConnectable()) {
 					key.attach (Boolean.FALSE);

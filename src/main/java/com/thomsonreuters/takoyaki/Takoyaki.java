@@ -6,6 +6,7 @@ package com.thomsonreuters.Takoyaki;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
+import java.nio.channels.SelectableChannel;
 import java.util.*;
 import java.util.zip.GZIPOutputStream;
 import org.apache.commons.cli.*;
@@ -39,7 +40,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-public class Takoyaki implements AnalyticStreamDispatcher {
+public class Takoyaki implements AnalyticStreamDispatcher, AnalyticConsumer.Delegate {
 
 /* Application configuration. */
 	private Config config;
@@ -296,8 +297,12 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.zmq_context = ZMQ.context (1);
 		this.abort_sock = this.zmq_context.socket (ZMQ.DEALER);
 		this.dispatcher = this.zmq_context.socket (ZMQ.ROUTER);
-		this.dispatcher.bind ("inproc://rfa");
-		this.abort_sock.connect ("inproc://rfa");
+		this.dispatcher.bind ("inproc://upa");
+		this.abort_sock.connect ("inproc://upa");
+
+		this.dealer = this.zmq_context.socket (ZMQ.DEALER);
+		this.dealer.connect ("inproc://upa");
+		final SelectableChannel request_channel = this.dispatcher.getFD();
 
 /* UPA Context. */
 		this.upa = new Upa (this.config);
@@ -306,13 +311,13 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		}
 
 /* UPA consumer */
-		this.analytic_consumer = new AnalyticConsumer (this.config.getSession(), this.upa);
+		this.analytic_consumer = new AnalyticConsumer (this.config.getSession(), this.upa, this, request_channel);
 		if (!this.analytic_consumer.Initialize()) {
 			return false;
 		}
 
 /* FIXME: preload analytic, time range must be within last 4 weeks */
-		final Analytic analytic = new Analytic ("ELEKTRON_AUX_TEST", "History", "tas", "FB.O");
+/*		final Analytic analytic = new Analytic ("ELEKTRON_AUX_TEST", "History", "tas", "FB.O");
 		try {
 			final Interval interval = Interval.parse ("2015-09-11T05:00:00.000Z/P5D");
 			analytic.setInterval (interval);
@@ -320,7 +325,7 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 			LOG.catching (e);
 		}
 		final AnalyticStream stream = new AnalyticStream (this, "<identity001>");
-		this.analytic_consumer.createAnalyticStream (analytic, stream);
+		this.analytic_consumer.createAnalyticStream (analytic, stream); */
 
 /* HTTP server */
 		this.http_server = HttpServer.create (new InetSocketAddress (this.config.getHostAndPort().getPort()), 0);
@@ -330,11 +335,37 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 		this.multipass = Maps.newHashMap();
 
 /* Single thread useful for debugging */
-//		this.http_server.setExecutor (java.util.concurrent.Executors.newSingleThreadExecutor());
+		this.http_server.setExecutor (java.util.concurrent.Executors.newSingleThreadExecutor());
 /* Default sensible multi-threaded option */
-		this.http_server.setExecutor (java.util.concurrent.Executors.newCachedThreadPool());
+//		this.http_server.setExecutor (java.util.concurrent.Executors.newCachedThreadPool());
 
 		return true;
+	}
+
+	private ZMQ.Socket dealer;
+
+/* dealer socket ready, pop request and start RSSL request mechanism */
+	@Override
+	public boolean OnRead() {
+		LOG.trace ("OnRead");
+		final String identity = this.dispatcher.recvStr();
+		this.dispatcher.recv (0);		// envelope delimiter
+		LOG.trace ("dispatch from \"{}\"", identity);
+		try {
+			final URI request = new URI (this.dispatcher.recvStr());
+			this.handler (request, identity);
+		} catch (Exception e) {
+			LOG.trace ("500 Internal Error.");
+			this.dispatcher.sendMore (identity);
+			this.dispatcher.sendMore ("");
+			this.dispatcher.sendMore (Integer.toString (HttpURLConnection.HTTP_INTERNAL_ERROR));
+			this.dispatcher.send (Throwables.getStackTraceAsString (e));
+		}
+/* re-read events due to edge triggering */
+		final int zmq_events = this.dispatcher.getEvents();
+		if (0 != (zmq_events & ZMQ.Poller.POLLIN))
+			return true;
+		return false;
 	}
 
 	private class MyHandler implements HttpHandler {
@@ -380,9 +411,8 @@ public class Takoyaki implements AnalyticStreamDispatcher {
 					final String identity = String.format ("%04X-%04X", this.rand.nextInt(), this.rand.nextInt());
 					try {
 						sock.setIdentity (identity.getBytes());
-						sock.connect ("inproc://rfa");
+						sock.connect ("inproc://upa");
 LOG.trace ("{}: send http/{}", identity, request.toASCIIString());
-						sock.sendMore ("http");
 						sock.send (request.toASCIIString());
 LOG.trace ("{}: block on recvStr()", identity);
 						final int response_code = Integer.parseInt (sock.recvStr());
@@ -431,7 +461,6 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 			{
 				LOG.trace ("Deactivating event queue ...");
 				LOG.trace ("Notifying mainloop ... ");
-				this.app.abort_sock.sendMore ("");
 				this.app.abort_sock.send ("abort");
 				try {
 					LOG.trace ("Waiting for mainloop shutdown ...");
@@ -484,8 +513,11 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 	}
 
 	private void mainloop() {
+		this.http_server.start();
+		LOG.info ("Listening on http://{}/", this.http_server.getAddress());
 		LOG.trace ("Waiting ...");
 		this.analytic_consumer.Run();
+		this.http_server.stop (0 /* seconds */);
 		LOG.trace ("Mainloop deactivated.");
 	}
 
