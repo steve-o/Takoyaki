@@ -37,7 +37,7 @@ public class AnalyticStream {
 
 	private Optional<Integer> stream_id;
 	private int command_id;
-	private Integer timer_handle;
+	private PendingTask timer_handle;
 	private int retry_count;
 
 	private Table<String, String, String> fids;
@@ -135,7 +135,7 @@ public class AnalyticStream {
 		this.setCommandId (-1);
 	}
 
-	public Integer getTimerHandle() {
+	public PendingTask getTimerHandle() {
 		return this.timer_handle;
         }
                 
@@ -143,7 +143,7 @@ public class AnalyticStream {
 		return null != this.getTimerHandle();
 	}
                 
-	public void setTimerHandle (Integer timer_handle) {
+	public void setTimerHandle (PendingTask timer_handle) {
 		this.timer_handle = timer_handle;
 	}
                 

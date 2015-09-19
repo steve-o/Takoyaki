@@ -17,6 +17,7 @@ import java.nio.channels.Selector;
 // Java 8
 import java.time.Instant;
 import java.time.temporal.ChronoField;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import org.apache.logging.log4j.LogManager;
@@ -387,13 +388,9 @@ request.qos().timeInfo (0);
 		}
 
 		private void registerRetryTimer (AnalyticStream stream, int retry_timer_ms) {
-//			final TimerIntSpec timer = new TimerIntSpec();
-//			timer.setDelay (retry_timer_ms);
-//			final Handle timer_handle = this.omm_consumer.registerClient (this.event_queue, timer, this, stream);
-//			if (timer_handle.isActive())
-//				stream.setTimerHandle (timer_handle);
-//			else
-//				LOG.error ("Timer handle for query \"{}\" closed on registration.", stream.getQuery());
+			final PendingTask timer_handle = PostDelayedTask (() -> {
+					this.OnTimerEvent();
+				}, retry_timer_ms);
 		}
 
 		public void destroyItemStream (AnalyticStream stream) {
@@ -411,7 +408,7 @@ request.qos().timeInfo (0);
 			this.streams.remove (stream);
 			this.stream_map.remove (stream.getStreamId());
 			if (stream.hasTimerHandle()) {
-//				this.omm_consumer.unregisterClient (stream.getTimerHandle());
+				CancelDelayedTask (stream.getTimerHandle());
 				stream.clearTimerHandle();
 				stream.clearRetryCount();
 			}
@@ -678,7 +675,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			final AnalyticStream stream = null;
 /* no retry if private stream is not available */
 			if (this.pending_connection) {
-//				this.OnAnalyticsStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
+				this.OnHistoryStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
 				stream.clearTimerHandle();
 			} else if (stream.getRetryCount() >= retry_limit) {
 				final State state = CodecFactory.createState();
@@ -687,9 +684,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 				final Buffer text = CodecFactory.createBuffer();
 				text.data ("Source did not respond.");
 				state.text (text);
-//				this.OnAnalyticsStatus (state,
-//							stream,
-//							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
+				this.OnHistoryStatus (state, stream, HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 /* prevent repeated invocation */
 				stream.clearTimerHandle();
 			} else {
@@ -699,9 +694,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 				final Buffer text = CodecFactory.createBuffer();
 				text.data ("Source did not respond.  Retrying.");
 				state.text (text);
-//				this.OnAnalyticsStatus (state,
-//							stream,
-//							HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
+				this.OnHistoryStatus (state, stream, HttpURLConnection.HTTP_GATEWAY_TIMEOUT);
 				stream.incrementRetryCount();
 				this.sendItemRequest (connection, stream);
 				this.registerRetryTimer (stream, retry_timer_ms);
@@ -958,6 +951,23 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 			return true;
 		}
 
+		private boolean OnHistoryStatus (State state, AnalyticStream stream, int response_code) {
+/* Defer to GSON to escape status text. */
+			LogMessage log_msg = new LogMessage (
+				MsgClasses.toString (MsgClasses.STATUS),
+				stream.getServiceName(),
+				stream.getAppName(),
+				stream.getItemName(),
+				stream.getQuery(),
+				StreamStates.toString (state.streamState()),
+				DataStates.toString (state.dataState()),
+				StateCodes.toString (state.code()),
+				state.text().toString());
+			stream.getDispatcher().dispatch (stream, response_code, gson.toJson (log_msg));
+			this.destroyItemStream (stream);
+			return true;
+		}
+
 		private boolean OnHistoryStatus (Channel c, DecodeIterator it, StatusMsg msg) {
 			LOG.trace ("OnHistoryStatus: {}", msg);
 			final AnalyticStream stream = this.stream_map.get (msg.streamId());
@@ -979,20 +989,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 				return true;
 			}
 
-/* Defer to GSON to escape status text. */
-			LogMessage log_msg = new LogMessage (
-				MsgClasses.toString (msg.msgClass()),
-				stream.getServiceName(),
-				stream.getAppName(),
-				stream.getItemName(),
-				stream.getQuery(),
-				StreamStates.toString (msg.state().streamState()),
-				DataStates.toString (msg.state().dataState()),
-				StateCodes.toString (msg.state().code()),
-				msg.state().text().toString());
-			stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_UNAVAILABLE, gson.toJson (log_msg));
-			this.destroyItemStream (stream);
-			return true;
+			return this.OnHistoryStatus (msg.state(), stream, HttpURLConnection.HTTP_UNAVAILABLE);
 		}
 
 		private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
@@ -1212,6 +1209,9 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 		this.tokens = new LinkedHashMap<>();
 		this.dictionary_tokens = HashBiMap.create();
 		this.rdm_dictionary = CodecFactory.createDataDictionary();
+
+		this.work_queue = new LinkedList<>();
+		this.delayed_work_queue = new LinkedList<>();
 		return true;
 	}
 
@@ -1221,6 +1221,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 /* includes input fds */
 	private Selector selector;
 	private Set<SelectionKey> out_keys;
+	private Optional<Instant> delayed_work_time;
 
 	public void Run() {
 		assert this.keep_running : "Quit must have been called outside of Run!";
@@ -1229,14 +1230,13 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 // throws IOException for undocumented reasons.
 		try {
 			this.selector = Selector.open();
-LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selectedKeys().size());
 		} catch (IOException e) {
 			LOG.catching (e);
 			this.keep_running = true;
 			return;
 		}
 		this.out_keys = null;
-		final long timeout = 1000 * 100;
+		final long timeout = 100 * 1000;	/* milliseconds */
 
 /* Add external reply socket */
 		if (null != this.reply_channel) {
@@ -1247,24 +1247,55 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 			}
 		}
 
+		delayed_work_time = Optional.empty();
+
 		while (true) {
 			boolean did_work = DoWork();
+			if (!this.keep_running)
+				break;
 
+			did_work |= DoDelayedWork();
 			if (!this.keep_running)
 				break;
 
 			if (did_work)
 				continue;
 
-			try {
-				final int rc = this.selector.select (timeout /* milliseconds */);
-				if (rc > 0) {
-					this.out_keys = this.selector.selectedKeys();
-				} else {
-					this.out_keys = null;
+			did_work = DoIdleWork();
+			if (!this.keep_running)
+				break;
+
+			if (did_work)
+				continue;
+
+			if (!delayed_work_time.isPresent()) {
+				try {
+					final int rc = this.selector.select (timeout /* milliseconds */);
+					if (rc > 0) {
+						this.out_keys = this.selector.selectedKeys();
+					} else {
+						this.out_keys = null;
+					}
+				} catch (Exception e) {
+					LOG.catching (e);
 				}
-			} catch (Exception e) {
-				LOG.catching (e);
+			} else {
+				final long delay = ChronoUnit.MILLIS.between (this.last_activity, delayed_work_time.get());
+				if (delay > 0) {
+					try {
+						final int rc = this.selector.select (delay /* milliseconds */);
+						if (rc > 0) {
+							this.out_keys = this.selector.selectedKeys();
+						} else {
+							this.out_keys = null;
+						}
+					} catch (Exception e) {
+						LOG.catching (e);
+					}
+				} else {
+					final Runnable pending_task = this.delayed_work_queue.poll().task;
+					pending_task.run();
+				}
 			}
 		}
 
@@ -1315,8 +1346,7 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 				key.attach (Boolean.TRUE);
 
 /* External socket event */
-				if (null != this.reply_channel
-					&& key.channel() == this.reply_channel
+				if (key.channel().equals (this.reply_channel)
 					&& key.isReadable())
 				{
 					if (!this.reply_delegate.OnRead())
@@ -1362,9 +1392,60 @@ LOG.trace ("select -> {}/{}", this.selector.keys().size(), this.selector.selecte
 		return did_work;
 	}
 
+	public boolean DoDelayedWork () {
+		if (this.delayed_work_queue.isEmpty()) {
+			this.delayed_work_time = Optional.empty();
+			return false;
+		}
+
+		final Instant next_run_time = this.delayed_work_queue.peek().delayed_run_time;
+		if (next_run_time.isAfter (this.last_activity)) {
+			this.last_activity = Instant.now();
+			if (next_run_time.isAfter (this.last_activity)) {
+				this.delayed_work_time = Optional.of (next_run_time);
+				return false;
+			}
+		}
+
+		final Runnable pending_task = this.delayed_work_queue.poll().task;
+		pending_task.run();
+
+		if (!this.delayed_work_queue.isEmpty())
+			this.delayed_work_time = Optional.of (this.delayed_work_queue.peek().delayed_run_time);
+		return true;
+	}
+
+	public boolean DoIdleWork() {
+		if (this.work_queue.isEmpty())
+			return false;
+
+// Execute oldest task
+		final Runnable pending_task = this.work_queue.poll();
+		pending_task.run();
+		return true;
+	}
+
 	public void Quit() {
 		this.keep_running = false;
 	}
+
+	public void PostTask (Runnable task) {
+		this.work_queue.offer (task);
+	}
+
+	private Queue<Runnable> work_queue;
+
+	public PendingTask PostDelayedTask (Runnable task, long delay) {
+		final PendingTask pending_task = new PendingTask (task, this.last_activity.plusMillis (delay));
+		this.delayed_work_queue.offer (pending_task);
+		return pending_task;
+	}
+
+	public void CancelDelayedTask (PendingTask task) {
+		this.delayed_work_queue.remove (task);
+	}
+
+	private Queue<PendingTask> delayed_work_queue;
 
 	private int server_idx = -1;
 

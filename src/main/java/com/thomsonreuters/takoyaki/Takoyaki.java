@@ -300,8 +300,6 @@ public class Takoyaki implements AnalyticStreamDispatcher, AnalyticConsumer.Dele
 		this.dispatcher.bind ("inproc://upa");
 		this.abort_sock.connect ("inproc://upa");
 
-		this.dealer = this.zmq_context.socket (ZMQ.DEALER);
-		this.dealer.connect ("inproc://upa");
 		final SelectableChannel request_channel = this.dispatcher.getFD();
 
 /* UPA Context. */
@@ -315,17 +313,6 @@ public class Takoyaki implements AnalyticStreamDispatcher, AnalyticConsumer.Dele
 		if (!this.analytic_consumer.Initialize()) {
 			return false;
 		}
-
-/* FIXME: preload analytic, time range must be within last 4 weeks */
-/*		final Analytic analytic = new Analytic ("ELEKTRON_AUX_TEST", "History", "tas", "FB.O");
-		try {
-			final Interval interval = Interval.parse ("2015-09-11T05:00:00.000Z/P5D");
-			analytic.setInterval (interval);
-		} catch (IllegalArgumentException e) {
-			LOG.catching (e);
-		}
-		final AnalyticStream stream = new AnalyticStream (this, "<identity001>");
-		this.analytic_consumer.createAnalyticStream (analytic, stream); */
 
 /* HTTP server */
 		this.http_server = HttpServer.create (new InetSocketAddress (this.config.getHostAndPort().getPort()), 0);
@@ -342,15 +329,16 @@ public class Takoyaki implements AnalyticStreamDispatcher, AnalyticConsumer.Dele
 		return true;
 	}
 
-	private ZMQ.Socket dealer;
-
 /* dealer socket ready, pop request and start RSSL request mechanism */
 	@Override
 	public boolean OnRead() {
 		LOG.trace ("OnRead");
+		int zmq_events = this.dispatcher.getEvents();
+		if (0 == (zmq_events & ZMQ.Poller.POLLIN))
+			return false;
 		final String identity = this.dispatcher.recvStr();
-		this.dispatcher.recv (0);		// envelope delimiter
 		LOG.trace ("dispatch from \"{}\"", identity);
+		this.dispatcher.recv (0);		// envelope delimiter
 		try {
 			final URI request = new URI (this.dispatcher.recvStr());
 			this.handler (request, identity);
@@ -362,7 +350,7 @@ public class Takoyaki implements AnalyticStreamDispatcher, AnalyticConsumer.Dele
 			this.dispatcher.send (Throwables.getStackTraceAsString (e));
 		}
 /* re-read events due to edge triggering */
-		final int zmq_events = this.dispatcher.getEvents();
+		zmq_events = this.dispatcher.getEvents();
 		if (0 != (zmq_events & ZMQ.Poller.POLLIN))
 			return true;
 		return false;
