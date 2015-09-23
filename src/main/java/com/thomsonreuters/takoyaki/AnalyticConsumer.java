@@ -389,8 +389,10 @@ request.qos().timeInfo (0);
 
 		private void registerRetryTimer (AnalyticStream stream, int retry_timer_ms) {
 			final PendingTask timer_handle = PostDelayedTask (() -> {
-					this.OnTimerEvent();
+					this.OnTimerEvent (stream);
 				}, retry_timer_ms);
+/* task cannot execute until after this function has returned. */
+			stream.setTimerHandle (timer_handle);
 		}
 
 		public void destroyItemStream (AnalyticStream stream) {
@@ -670,9 +672,9 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 		}
 
 /* Raise request timeout */
-		private void OnTimerEvent() {
+		private void OnTimerEvent (Object closure) {
 			LOG.trace ("OnTimerEvent: {}");
-			final AnalyticStream stream = null;
+			final AnalyticStream stream = (AnalyticStream)closure;
 /* no retry if private stream is not available */
 			if (this.pending_connection) {
 				this.OnHistoryStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
@@ -727,11 +729,28 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 				return false;
 			}
+/* map analytic stream from token */
+			final AnalyticStream stream = this.stream_map.get (encapsulated_msg.streamId());
+			if (null == stream) {
+				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
+				return true;
+			}
+/* clear request timeout, TBD: transient STATUS responses within timeout */
+			if (stream.hasTimerHandle()) {
+				LOG.trace ("Cancelling timer handle on response.");
+				CancelDelayedTask (stream.getTimerHandle());
+				stream.clearTimerHandle();
+				stream.clearRetryCount();
+			}
+			if (msg.isFinalMsg()) {
+				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" is closed.",
+					stream.getQuery(), stream.getServiceName(), stream.getAppName());
+			}
 			switch (encapsulated_msg.msgClass()) {
 			case MsgClasses.REFRESH:
-				return this.OnHistoryRefresh (c, it, (RefreshMsg)encapsulated_msg);
+				return this.OnHistoryRefresh (c, it, (RefreshMsg)encapsulated_msg, stream);
 			case MsgClasses.STATUS:
-				return this.OnHistoryStatus (c, it, (StatusMsg)encapsulated_msg);
+				return this.OnHistoryStatus (c, it, (StatusMsg)encapsulated_msg, stream);
 			default:
 				LOG.trace ("Uncaught: {}", encapsulated_msg);
 				return true;
@@ -763,13 +782,8 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 		}
 
 /* Elektron Time Series refresh */
-		private boolean OnHistoryRefresh (Channel c, DecodeIterator it, RefreshMsg msg) {
-			LOG.trace ("OnHistoryResponse: {}", msg);
-			final AnalyticStream stream = this.stream_map.get (msg.streamId());
-			if (null == stream) {
-				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
-				return true;
-			}
+		private boolean OnHistoryRefresh (Channel c, DecodeIterator it, RefreshMsg msg, AnalyticStream stream) {
+			LOG.trace ("OnHistoryRefresh: {}", msg);
 			if (DataTypes.SERIES != msg.containerType()) {
 				LOG.trace ("Unsupported data type {} in HISTORY refresh.", msg.containerType());
 				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_BAD_GATEWAY, "Unexpected data type.");
@@ -968,17 +982,8 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 			return true;
 		}
 
-		private boolean OnHistoryStatus (Channel c, DecodeIterator it, StatusMsg msg) {
+		private boolean OnHistoryStatus (Channel c, DecodeIterator it, StatusMsg msg, AnalyticStream stream) {
 			LOG.trace ("OnHistoryStatus: {}", msg);
-			final AnalyticStream stream = this.stream_map.get (msg.streamId());
-			if (null == stream) {
-				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
-				return true;
-			}
-			if (msg.isFinalMsg()) {
-				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" is closed.",
-					stream.getQuery(), stream.getServiceName(), stream.getAppName());
-			}
 /* auxiliary stream recovered. */
 			if (0 != (msg.flags() & StatusMsgFlags.HAS_STATE)
 				&& StreamStates.OPEN == msg.state().streamState()
@@ -1084,9 +1089,7 @@ LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 /* Prevent attempts to send a close request */
 				stream.close();
 /* Destroy for snapshots */
-//				this.OnHistoryStatus (this.closed_response_status,
-//							stream,
-//							HttpURLConnection.HTTP_UNAVAILABLE);
+				this.OnHistoryStatus (this.closed_response_status, stream, HttpURLConnection.HTTP_UNAVAILABLE);
 /* Cleanup */
 				this.removeItemStream (stream);
 			}
