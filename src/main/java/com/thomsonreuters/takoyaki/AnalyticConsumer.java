@@ -794,6 +794,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			final FieldEntry field_entry = CodecFactory.createFieldEntry();
 			final Series series = CodecFactory.createSeries();
 			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
+//			LOG.debug ("{}", series.decodeToXml (it, rdm_dictionary));
 			int rc = series.decode (it);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.error ("Series.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
@@ -911,7 +912,13 @@ try {
 						case DataTypes.ENUM:
 							rssl_enum.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_enum);
+try {
 							map.put (dictionary_entry.acronym().toString(), '"' + rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString() + '"');
+} catch (NullPointerException e) {
+	LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_enum);
+	LOG.catching (e);
+	map.put (dictionary_entry.acronym().toString(), rssl_enum.toString());
+}
 							break;
 						case DataTypes.RMTES_STRING:
 							rssl_buffer.decode (it);
