@@ -175,21 +175,21 @@ public class AnalyticStream {
 	private StringBuilder datetime_builder;
 	private int row_count;
 
-	public void putAll (String datetime, Map<String, String> map) {
+	public void putAll (StringBuilder datetime, Map<String, StringBuilder> map) {
 		if (this.all_fids.addAll (map.keySet())) {
 /* new FID in this map */
 			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
 				final String fid = (String)it.next();
 				if (this.fids.containsKey (fid)) {
 					if (map.containsKey (fid)) {
-						final String value = map.get (fid);
+						final StringBuilder value = map.get (fid);
 						this.fids.get (fid).append (value)
 							.append (",");
 					} else {
 						this.fids.get (fid).append ("null,");
 					}
 				} else {
-					final String value = map.get (fid);
+					final StringBuilder value = map.get (fid);
 					final StringBuilder sb;
 					if (row_count > 0)
 						sb = new StringBuilder (Strings.repeat ("null,", row_count));
@@ -205,7 +205,7 @@ public class AnalyticStream {
 			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
 				final String fid = (String)it.next();
 				if (map.containsKey (fid)) {
-					final String value = map.get (fid);
+					final StringBuilder value = map.get (fid);
 					this.fids.get (fid).append (value)
 						.append (",");
 				} else {
@@ -222,21 +222,21 @@ public class AnalyticStream {
 
 /* unsorted */
 	public Set<String> fidSet() {
-		return this.fids.keySet();
+		return this.all_fids;
 	}
 
-	public String joinedDateTimeSet() {
+	public StringBuilder joinedDateTimeSet() {
 /* TBD: do not call more than once */
 		if (this.datetime_builder.length() > 0)
 			this.datetime_builder.setLength (this.datetime_builder.length() - 1);
-		return this.datetime_builder.toString();
+		return this.datetime_builder;
 	}
 
-	public String joinedValueForFid (String fid) {
+	public StringBuilder joinedValueForFid (String fid) {
 		final StringBuilder sb = this.fids.get (fid);
 		if (sb.length() > 0)
 			sb.setLength (sb.length() - 1);
-		return sb.toString();
+		return sb;
 	}
 
 	public boolean hasResult() {

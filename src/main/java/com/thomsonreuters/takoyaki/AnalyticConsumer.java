@@ -828,7 +828,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			final com.thomsonreuters.upa.codec.Date rssl_date = CodecFactory.createDate();
 			final com.thomsonreuters.upa.codec.Time rssl_time = CodecFactory.createTime();
 			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
-			final Map<String, String> map = Maps.newHashMap();
+			final Map<String, StringBuilder> map = Maps.newHashMap();
 			DictionaryEntry dictionary_entry;
 			for (;;) {
 				rc = series_entry.decode (it);
@@ -851,7 +851,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 					return false;
 				}
 				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
-				String datetime_as_string = null;
+				sb.setLength (0);
 				map.clear();
 				for (;;) {
 					rc = field_entry.decode (it);
@@ -872,7 +872,8 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 							datetime = datetime.withYear (itvl_date.year())
 										.withMonth (itvl_date.month())
 										.withDayOfMonth (itvl_date.day());
-							datetime_as_string = '"' + datetime.toInstant().toString() + '"';
+							sb.setLength (0);
+							sb.append ('"').append (datetime.toInstant().toString()).append ('"');
 						}
 						break;
 					case 14223: // ITVL_TM_MS
@@ -894,7 +895,8 @@ try {
 			.withNano ((((Math.min (itvl_tm.millisecond(), 999) * 1000) + Math.min (itvl_tm.microsecond(), 999)) * 1000) + Math.min (itvl_tm.nanosecond(), 999));
 }
 /* convert to get standard ISO 8601 Zulu "Z" suffix, otherwise "[UTC]" will apear */
-							datetime_as_string = '"' + datetime.toInstant().toString() + '"';
+							sb.setLength (0);
+							sb.append ('"').append (datetime.toInstant().toString()).append ('"');
 						}
 						break;
 					default:
@@ -902,38 +904,45 @@ try {
 						case DataTypes.REAL:
 							rssl_real.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_real);
-							map.put (dictionary_entry.acronym().toString(), rssl_real.toString());
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder (rssl_real.toString()));
 							break;
 						case DataTypes.UINT:
 							rssl_uint.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_uint);
-							map.put (dictionary_entry.acronym().toString(), rssl_uint.toString());
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder (rssl_uint.toString()));
 							break;
 						case DataTypes.ENUM:
 							rssl_enum.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_enum);
 try {
-							map.put (dictionary_entry.acronym().toString(), '"' + rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString() + '"');
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder ("\"").append (rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString()).append ('"'));
 } catch (NullPointerException e) {
 	LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_enum);
 	LOG.catching (e);
-	map.put (dictionary_entry.acronym().toString(), rssl_enum.toString());
+	map.put (dictionary_entry.acronym().toString(),
+		new StringBuilder (rssl_enum.toString()));
 }
 							break;
 						case DataTypes.RMTES_STRING:
 							rssl_buffer.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_buffer);
-							map.put (dictionary_entry.acronym().toString(), '"' + rssl_buffer.toString() + '"');
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder ("\"").append (rssl_buffer.toString()).append ('"'));
 							break;
 						case DataTypes.DATE:
 							rssl_date.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_date);
-							map.put (dictionary_entry.acronym().toString(), '"' + rssl_date.toString() + '"');
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder ("\"").append (rssl_date.toString()).append ('"'));
 							break;
 						case DataTypes.TIME:
 							rssl_time.decode (it);
 //							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_time);
-							map.put (dictionary_entry.acronym().toString(), '"' + rssl_time.toString() + '"');
+							map.put (dictionary_entry.acronym().toString(),
+								new StringBuilder ("\"").append (rssl_time.toString()).append ('"'));
 							break;
 						default:
 							rssl_buffer.decode (it);
@@ -942,7 +951,7 @@ try {
 						break;
 					}
 				}
-				stream.putAll (datetime_as_string, map);
+				stream.putAll (sb, map);
 			}
 
 			if (msg.isFinalMsg()) {
