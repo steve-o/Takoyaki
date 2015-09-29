@@ -17,9 +17,13 @@ import com.google.common.collect.Sets;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
 import com.google.gson.Gson;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joda.time.Interval;
 
 public class AnalyticStream {
+        private static Logger LOG = LogManager.getLogger (AnalyticStream.class.getName());
+
 	private String query;
 
 /* Source instruments for this analytic, e.g. MSFT.O */
@@ -172,28 +176,48 @@ public class AnalyticStream {
 	private int row_count;
 
 	public void putAll (String datetime, Map<String, String> map) {
-		for (final Iterator it = map.keySet().iterator(); it.hasNext();) {
-			final String fid = (String)it.next();
-/* update set of all known fids */
-			if (this.all_fids.add (fid)) {
-/* pad out all rows excluding this one. */
-				StringBuilder sb;
-				if (row_count > 0)
-					sb = new StringBuilder (Strings.repeat ("null,", row_count));
-				else
-					sb = new StringBuilder();
-				sb.append (map.get (fid))
-					.append (",");
-				this.fids.put (fid, sb);
-			} else {
-				this.fids.get (fid).append (map.get (fid))
-					.append (",");
+		if (this.all_fids.addAll (map.keySet())) {
+/* new FID in this map */
+			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
+				final String fid = (String)it.next();
+				if (this.fids.containsKey (fid)) {
+					if (map.containsKey (fid)) {
+						final String value = map.get (fid);
+						this.fids.get (fid).append (value)
+							.append (",");
+					} else {
+						this.fids.get (fid).append ("null,");
+					}
+				} else {
+					final String value = map.get (fid);
+					final StringBuilder sb;
+					if (row_count > 0)
+						sb = new StringBuilder (Strings.repeat ("null,", row_count));
+					else
+						sb = new StringBuilder();
+					sb.append (value)
+						.append (",");
+					this.fids.put (fid, sb);
+				}
+			}
+		} else {
+/* FID list unchanged */
+			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
+				final String fid = (String)it.next();
+				if (map.containsKey (fid)) {
+					final String value = map.get (fid);
+					this.fids.get (fid).append (value)
+						.append (",");
+				} else {
+					this.fids.get (fid).append ("null,");
+				}
 			}
 		}
 /* datetime managed independently */
 		datetime_builder.append (datetime)
 			.append (",");
 		++row_count;
+//LOG.debug ("{}@{}: value={}\nsb={}", "IRGCOND", row_count, map.get ("IRGCOND"), this.fids.get ("IRGCOND").toString());
 	}
 
 /* unsorted */

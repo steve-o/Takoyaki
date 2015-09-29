@@ -972,6 +972,7 @@ com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.cr
 					  .append ("[")
 					  .append (stream.joinedValueForFid (fid))
 					  .append ("]");
+//LOG.debug ("count: {} x {}", stream.joinedValueForFid (fid).chars().filter (ch -> ch == ',').count(), fid);
 				}
 				sb.append ("]")
 				  .append ("}");
