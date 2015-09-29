@@ -594,7 +594,7 @@ request.qos().timeInfo (0);
 				return false;
 			}
 // optional: MAX_POINTS
-			rssl_int.value (3);
+			rssl_int.value (1000);
 			field_entry.dataType (DataTypes.INT);
 			field_entry.fieldId (7040);
 			rc = field_entry.encode (it, rssl_int);
@@ -827,6 +827,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			final com.thomsonreuters.upa.codec.Date rssl_date = CodecFactory.createDate();
 			final com.thomsonreuters.upa.codec.Time rssl_time = CodecFactory.createTime();
 			final com.thomsonreuters.upa.codec.Buffer rssl_buffer = CodecFactory.createBuffer();
+			final Map<String, String> map = Maps.newHashMap();
 			DictionaryEntry dictionary_entry;
 			for (;;) {
 				rc = series_entry.decode (it);
@@ -849,7 +850,8 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 					return false;
 				}
 				ZonedDateTime datetime = ZonedDateTime.ofInstant (Instant.ofEpochSecond (0), ZoneId.of ("UTC"));
-				String row = null;
+				String datetime_as_string = null;
+				map.clear();
 				for (;;) {
 					rc = field_entry.decode (it);
 					if (CodecReturnCodes.END_OF_CONTAINER == rc)
@@ -865,10 +867,11 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 						if (DataTypes.DATE == dictionary_entry.rwfType()) {
 							final com.thomsonreuters.upa.codec.Date itvl_date = CodecFactory.createDate();
 							itvl_date.decode (it);
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), itvl_date);
 							datetime = datetime.withYear (itvl_date.year())
 										.withMonth (itvl_date.month())
 										.withDayOfMonth (itvl_date.day());
-							row = '"' + datetime.toInstant().toString() + '"';
+							datetime_as_string = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					case 14223: // ITVL_TM_MS
@@ -876,6 +879,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 							final com.thomsonreuters.upa.codec.Time itvl_tm = CodecFactory.createTime();
 							itvl_tm.decode (it);
 try {
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), itvl_tm);
 							datetime = datetime.withHour (itvl_tm.hour())
 									.withMinute (itvl_tm.minute())
 									.withSecond (itvl_tm.second())
@@ -889,34 +893,40 @@ try {
 			.withNano ((((Math.min (itvl_tm.millisecond(), 999) * 1000) + Math.min (itvl_tm.microsecond(), 999)) * 1000) + Math.min (itvl_tm.nanosecond(), 999));
 }
 /* convert to get standard ISO 8601 Zulu "Z" suffix, otherwise "[UTC]" will apear */
-							row = '"' + datetime.toInstant().toString() + '"';
+							datetime_as_string = '"' + datetime.toInstant().toString() + '"';
 						}
 						break;
 					default:
 						switch (dictionary_entry.rwfType()) {
 						case DataTypes.REAL:
 							rssl_real.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), rssl_real.toString());
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_real);
+							map.put (dictionary_entry.acronym().toString(), rssl_real.toString());
 							break;
 						case DataTypes.UINT:
 							rssl_uint.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), rssl_uint.toString());
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_uint);
+							map.put (dictionary_entry.acronym().toString(), rssl_uint.toString());
 							break;
 						case DataTypes.ENUM:
 							rssl_enum.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString() + '"');
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_enum);
+							map.put (dictionary_entry.acronym().toString(), '"' + rdm_dictionary.entryEnumType (dictionary_entry, rssl_enum).display().toString() + '"');
 							break;
 						case DataTypes.RMTES_STRING:
 							rssl_buffer.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_buffer.toString() + '"');
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_buffer);
+							map.put (dictionary_entry.acronym().toString(), '"' + rssl_buffer.toString() + '"');
 							break;
 						case DataTypes.DATE:
 							rssl_date.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_date.toString() + '"');
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_date);
+							map.put (dictionary_entry.acronym().toString(), '"' + rssl_date.toString() + '"');
 							break;
 						case DataTypes.TIME:
 							rssl_time.decode (it);
-							stream.addResult (row, dictionary_entry.acronym().toString(), '"' + rssl_time.toString() + '"');
+//							LOG.debug ("{}: {}", dictionary_entry.acronym().toString(), rssl_time);
+							map.put (dictionary_entry.acronym().toString(), '"' + rssl_time.toString() + '"');
 							break;
 						default:
 							rssl_buffer.decode (it);
@@ -925,9 +935,11 @@ try {
 						break;
 					}
 				}
+				stream.putAll (datetime_as_string, map);
 			}
 
 			if (msg.isFinalMsg()) {
+com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.createStarted();
 				sb.setLength (0);
 				sb.append ('{')
 				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
@@ -935,7 +947,7 @@ try {
 				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
 				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
 				  .append (", \"fields\": [\"datetime\"");
-				final Set<String> fids = stream.getResultFids();
+				final Set<String> fids = stream.fidSet();
 				for (Iterator jt = fids.iterator(); jt.hasNext();) {
 					final String fid = (String)jt.next();
 					sb.append (",")
@@ -944,20 +956,21 @@ try {
 					  .append ("\"");
 				}
 				sb.append ("]")
-				  .append (", \"timeseries\": [[");
-				Joiner.on (",").appendTo (sb, stream.getResultDateTimes());
-				sb.append ("]");
+				  .append (", \"timeseries\": [[")
+				  .append (stream.joinedDateTimeSet())
+				  .append ("]");
 				for (Iterator jt = fids.iterator(); jt.hasNext();) {
 					final String fid = (String)jt.next();
-LOG.info ("array count {} -> {}", fid, stream.getResultForFid (fid).size());
 					sb.append (",")
-					  .append ("[");
-					Joiner.on (",").appendTo (sb, stream.getResultForFid (fid));
-					sb.append ("]");
+					  .append ("[")
+					  .append (stream.joinedValueForFid (fid))
+					  .append ("]");
 				}
 				sb.append ("]")
 				  .append ("}");
-				LOG.trace ("{}", sb.toString());
+long millis = stopwatch.elapsed (java.util.concurrent.TimeUnit.MILLISECONDS);
+LOG.debug ("time: {}", stopwatch);
+//				LOG.trace ("{}", sb.toString());
 				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 				this.destroyItemStream (stream);
 			}

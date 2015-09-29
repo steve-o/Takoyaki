@@ -5,10 +5,15 @@ package com.thomsonreuters.Takoyaki;
 
 import java.util.*;
 import com.google.common.base.Optional;
+import com.google.common.base.Strings;
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.RowSortedTable;
+import com.google.common.collect.Sets;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
 import com.google.gson.Gson;
@@ -39,8 +44,6 @@ public class AnalyticStream {
 	private int command_id;
 	private PendingTask timer_handle;
 	private int retry_count;
-
-	private Table<String, String, String> fids;
 
 	private boolean is_closed;
 
@@ -163,34 +166,53 @@ public class AnalyticStream {
 		this.retry_count = 0;
 	}
 
-	public void addResult (String datetime, String fid, String value) {
-		this.fids.put (datetime, fid, value);
-	}
+	private HashMap<String, StringBuilder> fids;
+	private Set<String> all_fids;
+	private StringBuilder datetime_builder;
+	private int row_count;
 
-	public Set<String> getResultFids() {
-		return this.fids.columnKeySet();
-	}
-
-	public Set<String> getResultDateTimes() {
-		return this.fids.rowKeySet();
-	}
-
-	public List<String> getResultForFid (String fid) {
-		final Map<String, String> map = this.fids.column (fid);
-		final Set<String> set = this.fids.rowKeySet();
-		final List<String> list = new LinkedList<String>();
-		for (Iterator it = set.iterator(); it.hasNext();) {
-			final String row = (String)it.next();
-			if (map.containsKey (row)) {
-				list.add (map.get (row));
+	public void putAll (String datetime, Map<String, String> map) {
+		for (final Iterator it = map.keySet().iterator(); it.hasNext();) {
+			final String fid = (String)it.next();
+/* update set of all known fids */
+			if (this.all_fids.add (fid)) {
+/* pad out all rows excluding this one. */
+				StringBuilder sb;
+				if (row_count > 0)
+					sb = new StringBuilder (Strings.repeat ("null,", row_count));
+				else
+					sb = new StringBuilder();
+				sb.append (map.get (fid))
+					.append (",");
+				this.fids.put (fid, sb);
 			} else {
-/* prefer null but R needs tlc to process the result.
- * ref: http://stackoverflow.com/questions/15793759/convert-r-list-to-dataframe-with-missing-null-elements
- */
-				list.add ("null");
+				this.fids.get (fid).append (map.get (fid))
+					.append (",");
 			}
 		}
-		return list;
+/* datetime managed independently */
+		datetime_builder.append (datetime)
+			.append (",");
+		++row_count;
+	}
+
+/* unsorted */
+	public Set<String> fidSet() {
+		return this.fids.keySet();
+	}
+
+	public String joinedDateTimeSet() {
+/* TBD: do not call more than once */
+		if (this.datetime_builder.length() > 0)
+			this.datetime_builder.setLength (this.datetime_builder.length() - 1);
+		return this.datetime_builder.toString();
+	}
+
+	public String joinedValueForFid (String fid) {
+		final StringBuilder sb = this.fids.get (fid);
+		if (sb.length() > 0)
+			sb.setLength (sb.length() - 1);
+		return sb.toString();
 	}
 
 	public boolean hasResult() {
@@ -198,7 +220,10 @@ public class AnalyticStream {
 	}
 
 	public void clearResult() {
-		this.fids = TreeBasedTable.create();
+		this.fids = Maps.newHashMap();
+		this.all_fids = Sets.newHashSet();
+		this.datetime_builder = new StringBuilder();
+		this.row_count = 0;
 	}
 
 	public boolean isClosed() {
