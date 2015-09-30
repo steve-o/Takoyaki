@@ -6,7 +6,7 @@
 
   <groupId>com.thomsonreuters</groupId>
   <artifactId>Takoyaki</artifactId>
-  <version>5.3-SNAPSHOT</version>
+  <version>6.0-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>Takoyaki</name>
@@ -117,18 +117,11 @@
       <version>0.3.2</version>
     </dependency>
     <dependency>
-      <groupId>com.reuters.rfa</groupId>
-      <artifactId>rfa</artifactId>
+      <groupId>com.thomsonreuters.upa</groupId>
+      <artifactId>upa</artifactId>
       <version>8.0.0</version>
       <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/rfaj8.0.0.L2.all.rrg/Libs/rfa.jar</systemPath>
-    </dependency>
-    <dependency>
-      <groupId>com.thomsonreuters.rfa.valueadd.domainrep</groupId>
-      <artifactId>valueadd-domainrep</artifactId>
-      <version>7.6.0</version>
-      <scope>system</scope>
-      <systemPath>${project.basedir}/third_party/rfaj7.6.0.L1.all.rrg/ValueAdd/Source/DomainRep/Classes/ValueAdd_DomainRep.jar</systemPath>
+      <systemPath>${project.basedir}/third_party/upaj8.0.0.L1.all.rrg/Libs/upa.jar</systemPath>
     </dependency>
   </dependencies>
 </project>

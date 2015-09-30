@@ -5,17 +5,25 @@ package com.thomsonreuters.Takoyaki;
 
 import java.util.*;
 import com.google.common.base.Optional;
+import com.google.common.base.Strings;
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.RowSortedTable;
+import com.google.common.collect.Sets;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeBasedTable;
 import com.google.gson.Gson;
-import com.reuters.rfa.common.Handle;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joda.time.Interval;
 
 public class AnalyticStream {
+        private static Logger LOG = LogManager.getLogger (AnalyticStream.class.getName());
+
 	private String query;
 
 /* Source instruments for this analytic, e.g. MSFT.O */
@@ -38,10 +46,8 @@ public class AnalyticStream {
 
 	private Optional<Integer> stream_id;
 	private int command_id;
-	private Handle timer_handle;
+	private PendingTask timer_handle;
 	private int retry_count;
-
-	private Table<String, String, String> fids;
 
 	private boolean is_closed;
 
@@ -136,7 +142,7 @@ public class AnalyticStream {
 		this.setCommandId (-1);
 	}
 
-	public Handle getTimerHandle() {
+	public PendingTask getTimerHandle() {
 		return this.timer_handle;
         }
                 
@@ -144,7 +150,7 @@ public class AnalyticStream {
 		return null != this.getTimerHandle();
 	}
                 
-	public void setTimerHandle (Handle timer_handle) {
+	public void setTimerHandle (PendingTask timer_handle) {
 		this.timer_handle = timer_handle;
 	}
                 
@@ -164,34 +170,73 @@ public class AnalyticStream {
 		this.retry_count = 0;
 	}
 
-	public void addResult (String datetime, String fid, String value) {
-		this.fids.put (datetime, fid, value);
-	}
+	private HashMap<String, StringBuilder> fids;
+	private Set<String> all_fids;
+	private StringBuilder datetime_builder;
+	private int row_count;
 
-	public Set<String> getResultFids() {
-		return this.fids.columnKeySet();
-	}
-
-	public Set<String> getResultDateTimes() {
-		return this.fids.rowKeySet();
-	}
-
-	public List<String> getResultForFid (String fid) {
-		final Map<String, String> map = this.fids.column (fid);
-		final Set<String> set = this.fids.rowKeySet();
-		final List<String> list = new LinkedList<String>();
-		for (Iterator it = set.iterator(); it.hasNext();) {
-			final String row = (String)it.next();
-			if (map.containsKey (row)) {
-				list.add (map.get (row));
-			} else {
-/* prefer null but R needs tlc to process the result.
- * ref: http://stackoverflow.com/questions/15793759/convert-r-list-to-dataframe-with-missing-null-elements
- */
-				list.add ("null");
+	public void putAll (StringBuilder datetime, Map<String, StringBuilder> map) {
+		if (this.all_fids.addAll (map.keySet())) {
+/* new FID in this map */
+			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
+				final String fid = (String)it.next();
+				if (this.fids.containsKey (fid)) {
+					if (map.containsKey (fid)) {
+						final StringBuilder value = map.get (fid);
+						this.fids.get (fid).append (value)
+							.append (",");
+					} else {
+						this.fids.get (fid).append ("null,");
+					}
+				} else {
+					final StringBuilder value = map.get (fid);
+					final StringBuilder sb;
+					if (row_count > 0)
+						sb = new StringBuilder (Strings.repeat ("null,", row_count));
+					else
+						sb = new StringBuilder();
+					sb.append (value)
+						.append (",");
+					this.fids.put (fid, sb);
+				}
+			}
+		} else {
+/* FID list unchanged */
+			for (final Iterator it = this.all_fids.iterator(); it.hasNext();) {
+				final String fid = (String)it.next();
+				if (map.containsKey (fid)) {
+					final StringBuilder value = map.get (fid);
+					this.fids.get (fid).append (value)
+						.append (",");
+				} else {
+					this.fids.get (fid).append ("null,");
+				}
 			}
 		}
-		return list;
+/* datetime managed independently */
+		datetime_builder.append (datetime)
+			.append (",");
+		++row_count;
+//LOG.debug ("{}@{}: value={}\nsb={}", "IRGCOND", row_count, map.get ("IRGCOND"), this.fids.get ("IRGCOND").toString());
+	}
+
+/* unsorted */
+	public Set<String> fidSet() {
+		return this.all_fids;
+	}
+
+	public StringBuilder joinedDateTimeSet() {
+/* TBD: do not call more than once */
+		if (this.datetime_builder.length() > 0)
+			this.datetime_builder.setLength (this.datetime_builder.length() - 1);
+		return this.datetime_builder;
+	}
+
+	public StringBuilder joinedValueForFid (String fid) {
+		final StringBuilder sb = this.fids.get (fid);
+		if (sb.length() > 0)
+			sb.setLength (sb.length() - 1);
+		return sb;
 	}
 
 	public boolean hasResult() {
@@ -199,7 +244,10 @@ public class AnalyticStream {
 	}
 
 	public void clearResult() {
-		this.fids = TreeBasedTable.create();
+		this.fids = Maps.newHashMap();
+		this.all_fids = Sets.newHashSet();
+		this.datetime_builder = new StringBuilder();
+		this.row_count = 0;
 	}
 
 	public boolean isClosed() {

@@ -6,7 +6,8 @@
   </Properties>
   <Appenders>
     <Console name="Console" target="SYSTEM_OUT">
-      <PatternLayout pattern="%highlight{%d %-5p [%t]: %m%n%throwable}{FATAL=magenta, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=blue}"/>
+<!--      <PatternLayout pattern="%highlight{%d %-5p [%t]: %m%n%throwable}{FATAL=magenta, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=blue}"/> -->
+      <PatternLayout pattern="%highlight{%d %-5p [%t] %c{1}(%F:%L): %m%n%throwable}{FATAL=magenta, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=blue}"/>
     </Console>
     <RollingRandomAccessFile name="File" fileName="${filename}"
         filePattern="logs/takoyaki.log.bak">
@@ -25,7 +26,6 @@
     </RollingRandomAccessFile>
   </Appenders>
   <Loggers>
-    <Logger name="com.reuters.rfa" level="warn"/>
     <Root level="trace">
       <AppenderRef ref="Console"/>
       <AppenderRef ref="File"/>
