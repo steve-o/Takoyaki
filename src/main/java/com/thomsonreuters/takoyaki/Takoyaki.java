@@ -682,6 +682,7 @@ LOG.trace ("http: send response {} to {}", response_code, this.identity);
 			if (timeinterval.isPresent()) {
 				try {
 					parsed_interval = Interval.parse (timeinterval.get());
+LOG.debug ("{} -> {}", timeinterval.get(), parsed_interval.toString());
 				} catch (IllegalArgumentException e) {
 					LOG.trace ("400 Bad Request");
 					this.dispatcher.sendMore (identity);

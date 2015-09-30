@@ -528,9 +528,10 @@ request.qos().timeInfo (0);
 			}
 // RQT_S_DATE+RQT_STM_MS
 			rssl_date.clear();
-			rssl_date.year (stream.getInterval().getStart().getYear());
-			rssl_date.month (stream.getInterval().getStart().getMonthOfYear());
-			rssl_date.day (stream.getInterval().getStart().getDayOfMonth());
+			final DateTime start = stream.getInterval().getStart().toDateTime (DateTimeZone.UTC);
+			rssl_date.year (start.getYear());
+			rssl_date.month (start.getMonthOfYear());
+			rssl_date.day (start.getDayOfMonth());
 			field_entry.dataType (DataTypes.DATE);
 			field_entry.fieldId (9219);
 			rc = field_entry.encode (it, rssl_date);
@@ -541,10 +542,10 @@ request.qos().timeInfo (0);
 				return false;
 			}
 			rssl_time.clear();
-			rssl_time.hour (stream.getInterval().getStart().getHourOfDay());
-			rssl_time.minute (stream.getInterval().getStart().getMinuteOfHour());
-			rssl_time.second (stream.getInterval().getStart().getSecondOfMinute());
-			rssl_time.millisecond (stream.getInterval().getStart().getMillisOfSecond());
+			rssl_time.hour (start.getHourOfDay());
+			rssl_time.minute (start.getMinuteOfHour());
+			rssl_time.second (start.getSecondOfMinute());
+			rssl_time.millisecond (start.getMillisOfSecond());
 			field_entry.dataType (DataTypes.TIME);
 			field_entry.fieldId (14225);
 			rc = field_entry.encode (it, rssl_time);
@@ -556,9 +557,10 @@ request.qos().timeInfo (0);
 			}
 // RQT_E_DATE+RQT_ETM_MS
 			rssl_date.clear();
-			rssl_date.year (stream.getInterval().getEnd().getYear());
-			rssl_date.month (stream.getInterval().getEnd().getMonthOfYear());
-			rssl_date.day (stream.getInterval().getEnd().getDayOfMonth());
+			final DateTime end = stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC);
+			rssl_date.year (end.getYear());
+			rssl_date.month (end.getMonthOfYear());
+			rssl_date.day (end.getDayOfMonth());
 			field_entry.dataType (DataTypes.DATE);
 			field_entry.fieldId (9218);
 			rc = field_entry.encode (it, rssl_date);
@@ -569,10 +571,10 @@ request.qos().timeInfo (0);
 				return false;
 			}
 			rssl_time.clear();
-			rssl_time.hour (stream.getInterval().getEnd().getHourOfDay());
-			rssl_time.minute (stream.getInterval().getEnd().getMinuteOfHour());
-			rssl_time.second (stream.getInterval().getEnd().getSecondOfMinute());
-			rssl_time.millisecond (stream.getInterval().getEnd().getMillisOfSecond());
+			rssl_time.hour (end.getHourOfDay());
+			rssl_time.minute (end.getMinuteOfHour());
+			rssl_time.second (end.getSecondOfMinute());
+			rssl_time.millisecond (end.getMillisOfSecond());
 			field_entry.dataType (DataTypes.TIME);
 			field_entry.fieldId (14224);
 			rc = field_entry.encode (it, rssl_time);
@@ -594,7 +596,7 @@ request.qos().timeInfo (0);
 				return false;
 			}
 // optional: MAX_POINTS
-			rssl_int.value (1000);
+			rssl_int.value (10000);
 			field_entry.dataType (DataTypes.INT);
 			field_entry.fieldId (7040);
 			rc = field_entry.encode (it, rssl_int);
@@ -735,7 +737,10 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
 				return true;
 			}
-/* clear request timeout, TBD: transient STATUS responses within timeout */
+/* clear request timeout,
+ * TBD: transient STATUS responses within timeout.
+ * FIXME: multi-part response with timeout on partial response.
+ */
 			if (stream.hasTimerHandle()) {
 				LOG.trace ("Cancelling timer handle on response.");
 				CancelDelayedTask (stream.getTimerHandle());
