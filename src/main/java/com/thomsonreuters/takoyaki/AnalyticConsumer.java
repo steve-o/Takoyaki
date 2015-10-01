@@ -15,17 +15,14 @@ import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 // Java 8
-import java.time.Instant;
-import java.time.temporal.ChronoField;
-import java.time.temporal.ChronoUnit;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.*;
+import java.time.format.*;
+import java.time.temporal.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
+import org.joda.time.Interval;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -528,7 +525,7 @@ request.qos().timeInfo (0);
 			}
 // RQT_S_DATE+RQT_STM_MS
 			rssl_date.clear();
-			final DateTime start = stream.getInterval().getStart().toDateTime (DateTimeZone.UTC);
+			final org.joda.time.DateTime start = stream.getInterval().getStart().toDateTime (org.joda.time.DateTimeZone.UTC);
 			rssl_date.year (start.getYear());
 			rssl_date.month (start.getMonthOfYear());
 			rssl_date.day (start.getDayOfMonth());
@@ -545,6 +542,7 @@ request.qos().timeInfo (0);
 			rssl_time.hour (start.getHourOfDay());
 			rssl_time.minute (start.getMinuteOfHour());
 			rssl_time.second (start.getSecondOfMinute());
+/* RsslTime is highly unusual with fractional seconds, but Joda Time does not support microseconds or nanoseconds. */
 			rssl_time.millisecond (start.getMillisOfSecond());
 			field_entry.dataType (DataTypes.TIME);
 			field_entry.fieldId (14225);
@@ -557,7 +555,7 @@ request.qos().timeInfo (0);
 			}
 // RQT_E_DATE+RQT_ETM_MS
 			rssl_date.clear();
-			final DateTime end = stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC);
+			final org.joda.time.DateTime end = stream.getInterval().getEnd().toDateTime (org.joda.time.DateTimeZone.UTC);
 			rssl_date.year (end.getYear());
 			rssl_date.month (end.getMonthOfYear());
 			rssl_date.day (end.getDayOfMonth());
@@ -964,8 +962,8 @@ com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.cr
 				sb.setLength (0);
 				sb.append ('{')
 				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
-				  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
-				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"start\":\"").append (stream.getInterval().getStart().toDateTime (org.joda.time.DateTimeZone.UTC).toString()).append ('\"')
+				  .append (", \"end\":\"").append (stream.getInterval().getEnd().toDateTime (org.joda.time.DateTimeZone.UTC).toString()).append ('\"')
 				  .append (", \"query\":\"").append (stream.getQuery()).append ('\"')
 				  .append (", \"fields\": [\"datetime\"");
 				final Set<String> fids = stream.fidSet();

@@ -9,11 +9,13 @@ import java.nio.charset.Charset;
 import java.nio.channels.SelectableChannel;
 import java.util.*;
 import java.util.zip.GZIPOutputStream;
+import java.time.*;
+import java.time.format.*;
 import org.apache.commons.cli.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.slf4j.bridge.SLF4JBridgeHandler;
 import org.zeromq.ZMQ;
+import org.joda.time.Interval;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.base.Splitter;
@@ -28,13 +30,6 @@ import com.google.common.collect.Sets;
 import com.google.common.io.CharStreams;
 import com.google.common.net.HostAndPort;
 import com.google.common.primitives.UnsignedInteger;
-import org.joda.time.format.DateTimeFormatter;
-import org.joda.time.format.ISODateTimeFormat;
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
-import org.joda.time.Duration;
-import org.joda.time.Interval;
-import org.joda.time.Period;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -509,9 +504,9 @@ LOG.trace ("{}: response HTTP/{}", identity, response_code);
 		LOG.trace ("Mainloop deactivated.");
 	}
 
-	final static Duration ONE_SECOND = Duration.standardSeconds (1);
-	final static Duration ONE_DAY = Duration.standardDays (1);
-	final DateTimeFormatter formatter = ISODateTimeFormat.dateTimeParser();
+	final static Duration ONE_SECOND = Duration.ofSeconds (1);
+	final static Duration ONE_DAY = Duration.ofDays (1);
+	final DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
 	private class Multipass implements AnalyticStreamDispatcher {
 		private final ImmutableSet<AnalyticStream> requests;
@@ -717,9 +712,9 @@ LOG.debug ("{} -> {}", timeinterval.get(), parsed_interval.toString());
 			  .append (techanalysis.get());
 			if (datetime.isPresent()) {
 				try {
-					final DateTime parsed_datetime = DateTime.parse (datetime.get());
+					final OffsetDateTime parsed_datetime = OffsetDateTime.parse (datetime.get());
 					sb.append (" datetime=")
-					  .append (parsed_datetime.withZone (DateTimeZone.UTC).toString());
+					  .append (parsed_datetime.toString());
 				} catch (IllegalArgumentException e) {
 					LOG.trace ("400 Bad Request");
 					this.dispatcher.sendMore (identity);
@@ -738,9 +733,10 @@ LOG.debug ("{} -> {}", timeinterval.get(), parsed_interval.toString());
 // override content
 					if (lagtype.get().equals ("duration")) {
 						try {
-							final Duration duration = Period.parse (lag.get()).toStandardDuration();
+							final Duration duration = Duration.ofDays (Period.parse (lag.get()).getDays());
 							lagtype = Optional.of ("second");
-							lag = Optional.of (Long.toString (duration.getStandardSeconds()));
+/* drop nanoseconds */
+							lag = Optional.of (Long.toString (duration.getSeconds()));
 						} catch (IllegalArgumentException e) {
 							LOG.trace ("400 Bad Request");
 							this.dispatcher.sendMore (identity);
@@ -760,9 +756,9 @@ LOG.debug ("{} -> {}", timeinterval.get(), parsed_interval.toString());
 				try {
 					final Interval parsed_interval = Interval.parse (timeinterval.get());
 					sb.append (" startdatetime=")
-					  .append (parsed_interval.getStart().toDateTime (DateTimeZone.UTC).toString())
+					  .append (parsed_interval.getStart().toDateTime (org.joda.time.DateTimeZone.UTC).toString())
 					  .append (" enddatetime=")
-					  .append (parsed_interval.getEnd().toDateTime (DateTimeZone.UTC).toString())
+					  .append (parsed_interval.getEnd().toDateTime (org.joda.time.DateTimeZone.UTC).toString())
 					  .append (" returnmode=historical");
 				} catch (IllegalArgumentException e) {
 					LOG.trace ("400 Bad Request");

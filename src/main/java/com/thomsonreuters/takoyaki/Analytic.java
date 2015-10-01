@@ -4,7 +4,7 @@
 package com.thomsonreuters.Takoyaki;
 
 import com.google.gson.Gson;
-import org.joda.time.Interval; 
+import org.joda.time.Interval;
 
 public class Analytic {
 	private String service;
@@ -52,6 +52,9 @@ public class Analytic {
 		this.item = item;
 	}
 
+/* java.time does not provide an equivalent to org.joda.time.Interval, we do not need microsecond precision either.
+ * org.threeten provides a suitable API equivalent but does not support 'datetime/duration' time interval input.
+ */
 	public Interval getInterval() {
 		return this.interval;
 	}
