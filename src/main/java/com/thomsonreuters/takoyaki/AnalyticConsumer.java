@@ -2447,11 +2447,11 @@ LOG.debug ("time: {}", stopwatch);
 		do {
 			rc = c.write (buf, write_args, rssl_err);
 			if (rc > 0) {
-				LOG.info ("Channel.write: { \"pendingBytes\": {}, \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				LOG.debug ("Channel.write: { \"pendingBytes\": {}, \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 					rc,
 					write_args.bytesWritten(), write_args.uncompressedBytesWritten(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 			} else {
-				LOG.info ("Channel.write: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+				LOG.debug ("Channel.write: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesWritten\": {}, \"uncompressedBytesWritten\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 					rc, TransportReturnCodes.toString (rc),
 					write_args.bytesWritten(), write_args.uncompressedBytesWritten(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 			}
@@ -2477,7 +2477,7 @@ LOG.debug ("time: {}", stopwatch);
 		} while (TransportReturnCodes.WRITE_CALL_AGAIN == rc);
 /* sent, no flush required. */
 		if (TransportReturnCodes.SUCCESS != rc) {
-			LOG.info ("Channel.write: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+			LOG.debug ("Channel.write: { \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 			return 0;
 		}
