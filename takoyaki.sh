@@ -17,7 +17,7 @@ COMMONSCLI=commons-cli-1.2.jar
 # Google libraries for JSON serialisation and ISO-8601 time
 GUAVA=guava-17.0.jar
 GSON=gson-2.2.4.jar
-JODA=joda-time-2.8.2.jar:third_party/threeten-extra/target/classes
+JODA=joda-time-2.8.2.jar
 
 # Apache Log4j2 and friends
 LOG4J2=log4j-api-2.0.jar:log4j-core-2.0.jar
