@@ -236,8 +236,7 @@ public class AnalyticConsumer implements ItemStream.Delegate {
 				this.app_name, this.private_stream.getServiceName());
 			final RequestMsg request = (RequestMsg)CodecFactory.createMsg();
 /* Set the message model type. */
-//			request.domainType (DomainTypes.SYSTEM);
-request.domainType (DomainTypes.HISTORY);
+			request.domainType (DomainTypes.SYSTEM);
 /* Set request type. */
 			request.msgClass (MsgClasses.REQUEST);
 			request.flags (RequestMsgFlags.STREAMING | RequestMsgFlags.PRIVATE_STREAM);
@@ -430,7 +429,7 @@ request.qos().timeInfo (0);
 
 /* Prepare GenericMsg encapsulation */
 			final GenericMsg wrapper = (GenericMsg)CodecFactory.createMsg();
-			wrapper.domainType (DomainTypes.HISTORY);
+			wrapper.domainType (DomainTypes.SYSTEM);
 			wrapper.msgClass (MsgClasses.GENERIC);
 			wrapper.flags (GenericMsgFlags.MESSAGE_COMPLETE);
 			wrapper.containerType (DataTypes.MSG);
@@ -504,14 +503,15 @@ request.qos().timeInfo (0);
 				return false;
 			}
 // MET_TF_U: 9=TAS, 10=TAQ
+			boolean is_intraday_request = false;
 			switch (stream.getQuery()) {
 			case "days":		rssl_enum.value (4); break;
 			case "weeks":		rssl_enum.value (5); break;
 			case "months":		rssl_enum.value (6); break;
 			case "quarters":	rssl_enum.value (7); break;
 			case "years":		rssl_enum.value (8); break;
-			case "tas":		rssl_enum.value (9); break;
-			case "taq":		rssl_enum.value (10); break;
+			case "tas":		rssl_enum.value (9);  is_intraday_request = true; break;
+			case "taq":		rssl_enum.value (10); is_intraday_request = true; break;
 			default: break;
 			}
 			field_entry.dataType (DataTypes.ENUM);
@@ -538,6 +538,7 @@ request.qos().timeInfo (0);
 					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_date);
 				return false;
 			}
+			if (is_intraday_request) {
 			rssl_time.clear();
 			rssl_time.hour (start.getHourOfDay());
 			rssl_time.minute (start.getMinuteOfHour());
@@ -552,6 +553,7 @@ request.qos().timeInfo (0);
 					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
 					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_time);
 				return false;
+			}
 			}
 // RQT_E_DATE+RQT_ETM_MS
 			rssl_date.clear();
@@ -568,6 +570,7 @@ request.qos().timeInfo (0);
 					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_date);
 				return false;
 			}
+			if (is_intraday_request) {
 			rssl_time.clear();
 			rssl_time.hour (end.getHourOfDay());
 			rssl_time.minute (end.getMinuteOfHour());
@@ -581,6 +584,7 @@ request.qos().timeInfo (0);
 					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc),
 					field_entry.fieldId(), DataTypes.toString (field_entry.dataType()), rssl_time);
 				return false;
+			}
 			}
 // optional: CORAX_ADJ
 			rssl_enum.value (1);
@@ -706,18 +710,9 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 /* encapsulated stream messages */
 		private boolean OnGenericMsg (Channel c, DecodeIterator it, Msg msg) {
 			LOG.trace ("OnGenericMsg: {}", msg);
-			switch (msg.domainType()) {
-			case DomainTypes.HISTORY:
-				return this.OnHistory (c, it, msg);
-
-			default:
-				LOG.trace ("Uncaught: {}", msg);
-				return true;
-			}
-		}
-
-		private boolean OnHistory (Channel c, DecodeIterator it, Msg msg) {
-			LOG.trace ("OnHistory: {}", msg);
+//			if (LOG.isDebugEnabled()) {
+				LOG.debug ("msg:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
+//			}
 			if (DataTypes.MSG != msg.containerType()) {
 				LOG.warn ("Unexpected container type in HISTORY response.");
 				return false;
@@ -729,8 +724,20 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 					rc, CodecReturnCodes.toString (rc), CodecReturnCodes.info (rc));
 				return false;
 			}
+			switch (encapsulated_msg.domainType()) {
+			case DomainTypes.HISTORY:
+				return this.OnHistory (c, it, encapsulated_msg);
+
+			default:
+				LOG.trace ("Uncaught: {}", msg);
+				return true;
+			}
+		}
+
+		private boolean OnHistory (Channel c, DecodeIterator it, Msg msg) {
+			LOG.trace ("OnHistory: {}", msg);
 /* map analytic stream from token */
-			final AnalyticStream stream = this.stream_map.get (encapsulated_msg.streamId());
+			final AnalyticStream stream = this.stream_map.get (msg.streamId());
 			if (null == stream) {
 				LOG.trace ("Ignoring response on stream id {} due to unregistered interest.", msg.streamId());
 				return true;
@@ -749,13 +756,13 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" is closed.",
 					stream.getQuery(), stream.getServiceName(), stream.getAppName());
 			}
-			switch (encapsulated_msg.msgClass()) {
+			switch (msg.msgClass()) {
 			case MsgClasses.REFRESH:
-				return this.OnHistoryRefresh (c, it, (RefreshMsg)encapsulated_msg, stream);
+				return this.OnHistoryRefresh (c, it, (RefreshMsg)msg, stream);
 			case MsgClasses.STATUS:
-				return this.OnHistoryStatus (c, it, (StatusMsg)encapsulated_msg, stream);
+				return this.OnHistoryStatus (c, it, (StatusMsg)msg, stream);
 			default:
-				LOG.trace ("Uncaught: {}", encapsulated_msg);
+				LOG.trace ("Uncaught: {}", msg);
 				return true;
 			}
 		}
@@ -797,7 +804,7 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			final FieldEntry field_entry = CodecFactory.createFieldEntry();
 			final Series series = CodecFactory.createSeries();
 			final SeriesEntry series_entry = CodecFactory.createSeriesEntry();
-//			LOG.debug ("{}", series.decodeToXml (it, rdm_dictionary));
+LOG.debug ("{}", series.decodeToXml (it, rdm_dictionary));
 			int rc = series.decode (it);
 			if (CodecReturnCodes.SUCCESS != rc) {
 				LOG.error ("Series.decode: { \"returnCode\": {}, \"enumeration\": \"{}\", \"text\": \"{}\" }",
@@ -1032,8 +1039,7 @@ LOG.debug ("time: {}", stopwatch);
 
 		private boolean OnSystem (Channel c, DecodeIterator it, Msg msg) {
 			if (LOG.isDebugEnabled()) {
-// FIXME: disable until serialization fixed for series dictionary
-//				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
+				LOG.debug ("App response:{}{}", LINE_SEPARATOR, DecodeToXml (msg, c.majorVersion(), c.minorVersion()));
 			}
 
 			State state = null;
@@ -1818,11 +1824,11 @@ LOG.debug ("time: {}", stopwatch);
 		final TransportBuffer buf = c.read (read_args, rssl_err);
 		final int rc = read_args.readRetVal();
 		if (rc > 0) {
-			LOG.info ("Channel.read: { \"pendingBytes\": {}, \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+			LOG.debug ("Channel.read: { \"pendingBytes\": {}, \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 				rc,
 				read_args.bytesRead(), read_args.uncompressedBytesRead(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 		} else {
-			LOG.info ("Channel.read: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+			LOG.debug ("Channel.read: { \"returnCode\": {}, \"enumeration\": \"{}\", \"bytesRead\": {}, \"uncompressedBytesRead\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 				rc, TransportReturnCodes.toString (rc),
 				read_args.bytesRead(), read_args.uncompressedBytesRead(), rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 		}
@@ -2010,8 +2016,6 @@ LOG.debug ("time: {}", stopwatch);
 			return this.OnDirectory (c, it, msg);
 		case DomainTypes.DICTIONARY:
 			return this.OnDictionary (c, it, msg);
-		case DomainTypes.HISTORY:
-		case DomainTypes.ANALYTICS:
 		case DomainTypes.SYSTEM:
 			return this.OnSystem (c, it, msg);
 		default:
@@ -2487,11 +2491,11 @@ LOG.debug ("time: {}", stopwatch);
 
 		final int rc = c.ping (rssl_err);
 		if (rc > 0) {
-			LOG.info ("Channel.ping: { \"pendingBytes\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+			LOG.debug ("Channel.ping: { \"pendingBytes\": {}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 				rc,
 				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 		} else {
-			LOG.info ("Channel.ping: { \"returnCode\": {}, \"enumeration\": \"{}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
+			LOG.debug ("Channel.ping: { \"returnCode\": {}, \"enumeration\": \"{}, \"rsslErrorId\": {}, \"sysError\": {}, \"text\": \"{}\" }",
 				rc, TransportReturnCodes.toString (rc),
 				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
 		}
