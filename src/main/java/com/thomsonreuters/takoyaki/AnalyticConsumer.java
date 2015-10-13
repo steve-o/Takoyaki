@@ -744,20 +744,34 @@ LOG.debug ("{}", DecodeToXml (wrapper, buf, c.majorVersion(), c.minorVersion()))
 			}
 /* clear request timeout,
  * TBD: transient STATUS responses within timeout.
- * FIXME: multi-part response with timeout on partial response.
  */
-			if (stream.hasTimerHandle()) {
-				LOG.trace ("Cancelling timer handle on response.");
-				CancelDelayedTask (stream.getTimerHandle());
-				stream.clearTimerHandle();
-				stream.clearRetryCount();
-			}
 			if (msg.isFinalMsg()) {
+				if (stream.hasTimerHandle()) {
+					LOG.trace ("Cancelling timer handle on response.");
+					CancelDelayedTask (stream.getTimerHandle());
+					stream.clearTimerHandle();
+					stream.clearRetryCount();
+				}
 				LOG.trace ("Query \"{}\" on service/app \"{}/{}\" is closed.",
 					stream.getQuery(), stream.getServiceName(), stream.getAppName());
 			}
 			switch (msg.msgClass()) {
 			case MsgClasses.REFRESH:
+/* HISTORY domain has broken message semantics, extract out status messages from refresh set. */
+				if ((StreamStates.CLOSED == ((RefreshMsg)msg).state().streamState()
+					|| StreamStates.CLOSED_RECOVER == ((RefreshMsg)msg).state().streamState())
+					&& DataStates.SUSPECT == ((RefreshMsg)msg).state().dataState())
+				{
+					int response_code = HttpURLConnection.HTTP_UNAVAILABLE;
+					switch (((RefreshMsg)msg).state().code()) {
+					case StateCodes.NOT_FOUND:	response_code = HttpURLConnection.HTTP_NOT_FOUND; break;
+					case StateCodes.NOT_ENTITLED:	response_code = HttpURLConnection.HTTP_FORBIDDEN; break;
+					case StateCodes.USAGE_ERROR:	response_code = HttpURLConnection.HTTP_BAD_GATEWAY; break;
+					case StateCodes.TIMEOUT:	response_code = HttpURLConnection.HTTP_GATEWAY_TIMEOUT; break;
+					default: break;
+					}
+					return this.OnHistoryStatus (((RefreshMsg)msg).state(), stream, response_code);
+				}
 				return this.OnHistoryRefresh (c, it, (RefreshMsg)msg, stream);
 			case MsgClasses.STATUS:
 				return this.OnHistoryStatus (c, it, (StatusMsg)msg, stream);
