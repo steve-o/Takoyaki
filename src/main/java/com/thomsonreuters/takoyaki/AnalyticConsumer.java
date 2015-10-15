@@ -979,7 +979,10 @@ try {
 			}
 
 			if (msg.isFinalMsg()) {
-com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.createStarted();
+				com.google.common.base.Stopwatch stopwatch = null;
+				if (LOG.isDebugEnabled()) {
+					stopwatch = com.google.common.base.Stopwatch.createStarted();
+				}
 				sb.setLength (0);
 				sb.append ('{')
 				  .append ("\"recordname\":\"").append (stream.getItemName()).append ('\"')
@@ -1005,12 +1008,12 @@ com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.cr
 					  .append ("[")
 					  .append (stream.joinedValueForFid (fid))
 					  .append ("]");
-//LOG.debug ("count: {} x {}", stream.joinedValueForFid (fid).chars().filter (ch -> ch == ',').count(), fid);
 				}
 				sb.append ("]")
 				  .append ("}");
-long millis = stopwatch.elapsed (java.util.concurrent.TimeUnit.MILLISECONDS);
-LOG.debug ("time: {}", stopwatch);
+				if (null != stopwatch) {
+					LOG.debug ("time: {}", stopwatch);
+				}
 //				LOG.trace ("{}", sb.toString());
 				stream.getDispatcher().dispatch (stream, HttpURLConnection.HTTP_OK, sb.toString());
 				this.destroyItemStream (stream);
