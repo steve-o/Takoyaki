@@ -1414,19 +1414,19 @@ try {
 					continue;
 				}
 /* connected */
-				if (key.isConnectable()) {
+				if (key.isValid() && key.isConnectable()) {
 					key.attach (Boolean.FALSE);
 					this.OnCanConnectWithoutBlocking (c);
 					did_work = true;
 				}
 /* incoming */
-				if (key.isReadable()) {
+				if (key.isValid() && key.isReadable()) {
 					key.attach (Boolean.FALSE);
 					this.OnCanReadWithoutBlocking (c);
 					did_work = true;
 				}
 /* outgoing */
-				if (key.isWritable()) {
+				if (key.isValid() && key.isWritable()) {
 					key.attach (Boolean.FALSE);
 					this.OnCanWriteWithoutBlocking (c);
 					did_work = true;
@@ -1548,7 +1548,8 @@ try {
 				LOG.catching (e);
 			}
 
-			LOG.info ("RSSL socket created: { \"connectionType\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {}, \"pingTimeout\": {}, \"protocolType\": {}, \"socketId\": {}, \"state\": \"{}\" }",
+			LOG.info ("RSSL socket created: { \"connectionInfo\": {}, \"connectionType\": \"{}\", \"majorVersion\": {}, \"minorVersion\": {}, \"pingTimeout\": {}, \"protocolType\": {}, \"socketId\": {}, \"state\": \"{}\" }",
+				addr.unifiedNetworkInfo(),
 				ConnectionTypes.toString (c.connectionType()), c.majorVersion(), c.minorVersion(), c.pingTimeout(), c.protocolType(), c.selectableChannel().hashCode(), ChannelState.toString (c.state()));
 		}
 	}
@@ -1626,6 +1627,7 @@ try {
 		default:
 			LOG.error ("Channel.init: { \"errorId\": {}, \"sysError\": \"{}\", \"text\": \"{}\" }",
 				rssl_err.errorId(), rssl_err.sysError(), rssl_err.text());
+			this.Abort (c);
 			break;
 		}
 	}
